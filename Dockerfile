@@ -8,6 +8,12 @@ ARG USERNAME=dev
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID
 
+# Ubuntu 23.04+/24.04 base images ship a default "ubuntu" user at UID/GID 1000,
+# which collides with the "dev" user (USER_UID/USER_GID default to 1000) created
+# below and makes useradd fail with exit code 4. Free up the UID/GID if present;
+# no-op on older Ubuntu 22.04-based images that don't have this user.
+RUN if id -u ubuntu >/dev/null 2>&1 ; then userdel -r ubuntu ; fi
+
 RUN if [ "${INSTALL_VSCODE}" = "1" ] ; \
      then bash -c "$(curl -fsSL "https://raw.githubusercontent.com/microsoft/vscode-dev-containers/main/script-library/common-debian.sh")" -- "true" "${USERNAME}" "${USER_UID}" "${USER_GID}" "true" "true" "true"  && \
      apt-get clean -y && rm -rf /var/lib/apt/lists/* && \
@@ -29,6 +35,10 @@ RUN if [ "${INSTALL_VSCODE}" = "0" ] ; \
     echo 'export PATH="/opt/conda/bin:$PATH"' >> /home/${USERNAME}/.bashrc ; \
     else echo "Skipping SSH server" ; \
     fi
+
+# The nvcr.io/nvidia/pytorch base image doesn't ship python3-venv
+RUN apt-get update && apt-get install -y --no-install-recommends python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install the linters, black, and all the requirements in the requirements.txt
 COPY requirements.txt /tmp/pip-tmp/

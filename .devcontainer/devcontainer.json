@@ -6,20 +6,22 @@
 		"context": "..",
 		"args": {
 			// Select your PyTorch version from https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes
-			"PYTORCH_VERSION": "23.10-py3",
+			"PYTORCH_VERSION": "25.03-py3",
 			"INSTALL_VSCODE": "1"
 		}
 	},
 	// Some config for Git
 	"remoteEnv": {
-		"GIT_NAME": "Christopher Gundler",
-		"GIT_EMAIL": "c.gundler@uke.de"
+		"GIT_NAME": "Graziella Credidio",
+		"GIT_EMAIL": "g.credidio@uke.de"
 	},
 	"postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && git config --global user.email \"${GIT_EMAIL}\" && git config --global user.name \"${GIT_NAME}\"",
 	"customizations": {
 		"vscode": {
 			"settings": {
-				"editor.defaultFormatter": "charliermarsh.ruff",
+				"[python]": {
+					"editor.defaultFormatter": "charliermarsh.ruff"
+				},
 				"editor.formatOnSave": true,
 				"python.defaultInterpreterPath": "/usr/bin/python"
 			},
@@ -28,7 +30,10 @@
 				"visualstudioexptteam.vscodeintellicode",
 				"ms-toolsai.jupyter",
 				"kevinrose.vsc-python-indent",
-				"charliermarsh.ruff"
+				"charliermarsh.ruff",
+				"anthropic.claude-code", //claude extension for VSCode
+				"ms-vscode.live-server", // live server extension for VSCode (visualize HTMLs)
+				"mechatroner.rainbow-csv" // rainbow csv extension for VSCode (visualize CSVs)
 			]
 		}
 	},
