@@ -9,7 +9,7 @@ from pathlib import Path
 import polars as pl
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
-from load_file import find_latest_file
+from load_files import find_latest_file
 
 GRAPH_PATH = find_latest_file("data/raw/optimuskg/", "optimuskg_lcc_graph_*.pkl")
 OUT_DIR = Path("data/raw/optimuskg/nodes")
