@@ -2,6 +2,11 @@
 # Created by https://www.toptal.com/developers/gitignore/api/windows,linux,macos,python,jupyternotebooks,pycharm+all,visualstudiocode,pydev,pythonvanilla
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows,linux,macos,python,jupyternotebooks,pycharm+all,visualstudiocode,pydev,pythonvanilla
 
+# Ignore specified folders
+data/raw/*
+data/processed/*
+
+
 ### JupyterNotebooks ###
 # gitignore template for Jupyter Notebooks
 # website: http://jupyter.org/
