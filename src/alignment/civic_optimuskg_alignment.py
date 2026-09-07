@@ -715,6 +715,15 @@ output_path = OUTPUT_DIR / f"civic_resolved_{date_str}.csv"
 civic_df.to_csv(output_path, index=False)
 print(f"\nSaved resolved dataset to {output_path}")
 
+# save cancer-relevant disease ids to a separate CSV for reference
+cancer_disease_ids_output_path = (
+    OUTPUT_DIR / f"cancer_relevant_disease_ids_{date_str}.csv"
+)
+pd.DataFrame({"disease_node_id": list(cancer_disease_ids_final)}).to_csv(
+    cancer_disease_ids_output_path, index=False
+)
+print(f"Saved cancer-relevant disease ids to {cancer_disease_ids_output_path}")
+
 # Optional:
 # # Save predictive subset to a separate CSV file for easier downstream analysis
 # predictive_output_path = OUTPUT_DIR / f"civic_resolved_predictive_subset_{date_str}.csv"
