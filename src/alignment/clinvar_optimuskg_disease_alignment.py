@@ -3,14 +3,14 @@
 Aligns ClinVar variant phenotypes (PhenotypeIDS) to OptimusKG disease nodes,
 for the ClinVar variant sets already aligned to CIViC-covered genes.
 
-It only needs three things civic_optimuskg_alignment.py has
-already produced or can cheaply reload:
-  1. OptimusKG's own disease nodes (to know which node ids are real)
+It only needs three things civic_optimuskg_alignment.py/civic_clinvar_gap_analysis.py
+have already produced:
+  1. OptimusKG's own disease nodes
   2. The final cancer-relevant disease scope (cancer_relevant_disease_ids_*.csv)
-  3. The ClinVar aligned-variant CSVs (clinvar_*_aligned_variants_*.csv),
-     which already carry PhenotypeIDS, VariationID, GeneSymbol, etc.
-     These are: genes for which CIViC has curated at least one evidence item,
-     of any evidence type.
+  3. The ClinVar aligned-variant CSVs (clinvar_*_aligned_variants_*.csv):
+     three classification-scoped tracks (genes for which CIViC has curated
+     at least one evidence item, of any evidence type) plus a fourth,
+     evidence_referenced (every ClinVar variant any CIViC evidence item references).
 
 Inputs:
     - data/raw/optimuskg/nodes/disease.parquet (from save_optimuskg_nodes.py)
@@ -18,6 +18,8 @@ Inputs:
     - data/processed/clinvar_predisposing_aligned_variants_*.csv
     - data/processed/clinvar_oncogenic_aligned_variants_*.csv
     - data/processed/clinvar_clinical_impact_aligned_variants_*.csv
+    - data/processed/clinvar_evidence_referenced_variants_*.csv
+      (all four from civic_clinvar_gap_analysis.py)
 Outputs:
     - data/processed/clinvar_<track>_aligned_variants_phenotype_enriched_<date>.csv
       for each track found, with two new columns:
@@ -44,11 +46,20 @@ from load_files import find_latest_file
 NODES_DIR = Path("data/raw/optimuskg/nodes")
 PROCESSED_DIR = Path("data/processed")
 
-# Each entry: (input filename pattern, output name fragment)
+# Each entry: (input filename pattern, output name fragment). The date glob
+# is deliberately a plain [0-9]... suffix, not a catch-all "*"; a trailing
+# "*.csv" would also match this same script's own past output (e.g.
+# "clinvar_predisposing_aligned_variants_phenotype_enriched_2026-09-03.csv"
+# matches "clinvar_predisposing_aligned_variants_*.csv" too), and since that
+# filename sorts after a same-track file with a later date (lexically,
+# "2" < "p"), find_latest_file would silently pick its own stale enriched
+# output back up as "latest" input on any run after the first.
+DATE_GLOB = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
 CLINVAR_ALIGNED_TRACKS = [
-    ("clinvar_predisposing_aligned_variants_*.csv", "predisposing"),
-    ("clinvar_oncogenic_aligned_variants_*.csv", "oncogenic"),
-    ("clinvar_clinical_impact_aligned_variants_*.csv", "clinical_impact"),
+    (f"clinvar_predisposing_aligned_variants_{DATE_GLOB}.csv", "predisposing"),
+    (f"clinvar_oncogenic_aligned_variants_{DATE_GLOB}.csv", "oncogenic"),
+    (f"clinvar_clinical_impact_aligned_variants_{DATE_GLOB}.csv", "clinical_impact"),
+    (f"clinvar_evidence_referenced_variants_{DATE_GLOB}.csv", "evidence_referenced"),
 ]
 
 # %%

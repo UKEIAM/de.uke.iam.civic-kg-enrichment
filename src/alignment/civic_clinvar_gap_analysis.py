@@ -17,6 +17,13 @@ Three independent gap-detection tracks, structured identically:
     3. ONCOGENIC vs ClinVar Oncogenicity (oncogenic/likely oncogenic)
     4. PREDICTIVE/DIAGNOSTIC/PROGNOSTIC vs ClinVar SomaticClinicalImpact (Tier I-III)
 
+Section 5 is not a gap-detection track. It's every ClinVar variant any CIViC evidence item
+references (any evidence_type). Feeds src/graph/save_graph_nodes.py's
+Variant node build via clinvar_optimuskg_disease_alignment.py, so a
+CIViC-referenced ClinVar variant still gets a node even where it doesn't
+carry a pathogenic/oncogenic/Tier I-III classification (e.g. Benign, or
+unclassified).
+
 Note: gene_node_ids in civic_resolved_*.csv round-trips through
 to_csv/read_csv as a Python-list repr string (e.g. "['ENSG00000146648']"),
 not a real list — parsed back explicitly via ast.literal_eval below.
@@ -34,6 +41,7 @@ Outputs:
     - data/processed/clinvar_oncogenic_gap_candidates_YYYY-MM-DD.csv
     - data/processed/clinvar_clinical_impact_aligned_variants_YYYY-MM-DD.csv
     - data/processed/clinvar_clinical_impact_gap_candidates_YYYY-MM-DD.csv
+    - data/processed/clinvar_evidence_referenced_variants_YYYY-MM-DD.csv
 
 Usage:
     python src/alignment/civic_clinvar_gap_analysis.py
@@ -556,5 +564,37 @@ clinical_impact_gap_candidates.to_csv(clinical_impact_gap_output_path, index=Fal
 print(
     f"Saved ClinVar clinical-impact gap candidates to {clinical_impact_gap_output_path}"
 )
+
+# %%
+# ---------------------------------------------------------------------------
+# 5. Evidence-referenced variants: every ClinVar variant any CIViC evidence
+#    item references, regardless of classification or gene alignment. Not a
+#    gap-detection track.
+#    A CIViC-referenced ClinVar variant gets a node even where it doesn't
+#    carry a pathogenic/oncogenic/Tier I-III classification.
+# ---------------------------------------------------------------------------
+
+all_referenced_variation_ids = set().union(*civic_df["clinvar_variation_ids_all"])
+print(
+    f"[evidence-referenced] {len(all_referenced_variation_ids)} unique ClinVar "
+    f"VariationIDs referenced by CIViC evidence items (any evidence_type, "
+    f"any classification)"
+)
+
+clinvar_evidence_referenced = clinvar_summary[
+    clinvar_summary["VariationID"].isin(all_referenced_variation_ids)
+].copy()
+print(
+    f"[evidence-referenced] {len(clinvar_evidence_referenced)} / "
+    f"{len(all_referenced_variation_ids)} referenced VariationIDs found in "
+    f"clinvar_summary (the rest reference a VariationID not present in this "
+    f"ClinVar snapshot)"
+)
+
+evidence_referenced_output_path = (
+    OUTPUT_DIR / f"clinvar_evidence_referenced_variants_{date_str}.csv"
+)
+clinvar_evidence_referenced.to_csv(evidence_referenced_output_path, index=False)
+print(f"Saved evidence-referenced variant set to {evidence_referenced_output_path}")
 
 # %%
