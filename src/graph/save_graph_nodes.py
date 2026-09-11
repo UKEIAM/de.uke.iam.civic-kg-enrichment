@@ -171,13 +171,24 @@ clinvar_raw_path = find_latest_file(
     Path("data/raw/clinvar"), "clinvar_variant_summary_*.tsv"
 )
 clinvar_summary = pd.read_csv(clinvar_raw_path, sep="\t", dtype=str)
-clinvar_summary = clinvar_summary.drop_duplicates(subset="VariationID", keep="first")
+# Prefer each variant's GRCh38 row over GRCh37/other, don't filter to
+# GRCh38-only (see civic_clinvar_gap_analysis.py's identical fix for the
+# full reasoning)
+clinvar_summary["_grch38_first"] = (clinvar_summary["Assembly"] != "GRCh38").astype(int)
+clinvar_summary = clinvar_summary.sort_values("_grch38_first").drop_duplicates(
+    subset="VariationID", keep="first"
+)
+clinvar_summary = clinvar_summary.drop(columns=["_grch38_first"])
 
-rsid_to_variationid = dict(
-    zip(
-        clinvar_summary.loc[clinvar_summary["RS# (dbSNP)"] != "-1", "RS# (dbSNP)"],
-        clinvar_summary.loc[clinvar_summary["RS# (dbSNP)"] != "-1", "VariationID"],
-    )
+# One-to-many, not one-to-one (see civic_clinvar_gap_analysis.py's
+# identical fix for why) (Some rsIDs map to more than
+# one VariationID; dict(zip(...)) would silently keep only one, dropping a
+# real match rather than just picking arbitrarily).
+rsid_to_variationids = (
+    clinvar_summary.loc[clinvar_summary["RS# (dbSNP)"] != "-1"]
+    .groupby("RS# (dbSNP)")["VariationID"]
+    .apply(set)
+    .to_dict()
 )
 
 
@@ -205,9 +216,9 @@ def get_civic_clinvar_variation_ids(row: pd.Series) -> set:
     if pd.notna(dbsnp_raw):
         for rsid in str(dbsnp_raw).split(","):
             bare_rsid = rsid.strip().lower().replace("rs", "")
-            variation_id = rsid_to_variationid.get(bare_rsid)
-            if variation_id:
-                ids.add(str(variation_id))
+            variation_ids = rsid_to_variationids.get(bare_rsid)
+            if variation_ids:
+                ids.update(str(vid) for vid in variation_ids)
 
     return ids
 
@@ -273,7 +284,10 @@ variant_nodes = (
             "ReviewStatusClinicalImpact",
             _first_non_null,
         ),
-        review_status_oncogenicity_clinvar=("ReviewStatusOncogenicity", _first_non_null),
+        review_status_oncogenicity_clinvar=(
+            "ReviewStatusOncogenicity",
+            _first_non_null,
+        ),
         clinical_significance_clinvar=("ClinicalSignificance", _first_non_null),
         oncogenicity=("Oncogenicity", _first_non_null),
         somatic_clinical_impact_tier=("SomaticClinicalImpact", _first_non_null),

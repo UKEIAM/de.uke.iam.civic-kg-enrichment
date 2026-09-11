@@ -244,8 +244,7 @@ def resolve_civic_disease_row(row: pd.Series) -> dict:
 # ---------------------------------------------------------------------------
 # 5. Gene resolution
 # - OptimusKG gene node primary ids are a mix of Ensembl (61,108 nodes) and NCBIGene (198
-#    nodes) — no reliable direct-Entrez match. Two independent, confirmed
-#    working paths, tried in order and combined since they fail on different rows:
+#    nodes). Two independent, confirmed working paths:
 #      1. hgnc_hub: CIViC Entrez id -> HGNC id (via HGNC's own complete set)
 #         -> OptimusKG gene node (via that node's own xrefs, source="HGNC")
 #      2. direct_ensembl: CIViC Entrez id -> Ensembl id (via the same HGNC

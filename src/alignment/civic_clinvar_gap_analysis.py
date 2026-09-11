@@ -110,18 +110,37 @@ hgnc_ensembl_pairs = hgnc_complete.dropna(subset=["entrez_id", "ensembl_gene_id"
 # ClinVar summary file (output from src/fetch_data/fetch_clinvar_data.py)
 clinvar_summary = pd.read_csv(CLINVAR_RAW_PATH, sep="\t", dtype=str)
 
-# Deduplicate variants by VariationID, keeping the first row for each variant (different genome versions)
-clinvar_summary = clinvar_summary.drop_duplicates(subset="VariationID", keep="first")
+# Prefer each variant's GRCh38 row over its GRCh37/other row when picking
+# one row per VariationID, rather than deduplicating by VariationID first
+# Sorting so GRCh38 rows sort first, then deduplicating keep="first":
+# every variant kept, GRCh38 coordinates wherever ClinVar has
+# them, the row's own Assembly column truthfully reporting GRCh37/other for
+# the minority that don't.
+clinvar_summary["_grch38_first"] = (clinvar_summary["Assembly"] != "GRCh38").astype(int)
+clinvar_summary = clinvar_summary.sort_values("_grch38_first").drop_duplicates(
+    subset="VariationID", keep="first"
+)
+clinvar_summary = clinvar_summary.drop(columns=["_grch38_first"])
 print(
-    f"[verify] clinvar_summary rows after de-duplicating by VariationID: {len(clinvar_summary)}"
+    f"[verify] clinvar_summary rows after de-duplicating by VariationID "
+    f"(GRCh38 preferred): {len(clinvar_summary)}"
+)
+print(
+    f"[verify] {(clinvar_summary['Assembly'] != 'GRCh38').sum()} kept rows are NOT "
+    f"GRCh38 (no GRCh38 row existed for that variant)"
 )
 
-# dbSNP rsID -> ClinVar VariationID, bare-number keyed
-rsid_to_variationid = dict(
-    zip(
-        clinvar_summary.loc[clinvar_summary["RS# (dbSNP)"] != "-1", "RS# (dbSNP)"],
-        clinvar_summary.loc[clinvar_summary["RS# (dbSNP)"] != "-1", "VariationID"],
-    )
+# dbSNP rsID -> ClinVar VariationID(s), bare-number keyed. One-to-many, not
+# one-to-one: 222,427 rsIDs (8.4% of all rsIDs with a VariationID, checked
+# directly) genuinely correspond to more than one distinct ClinVar record
+# (different submitters/interpretations of the same variant, multi-allelic
+# sites, …). Building this as a plain dict(zip(...)) would silently keep
+# only whichever VariationID happened to appear last for a colliding rsID
+rsid_to_variationids = (
+    clinvar_summary.loc[clinvar_summary["RS# (dbSNP)"] != "-1"]
+    .groupby("RS# (dbSNP)")["VariationID"]
+    .apply(set)
+    .to_dict()
 )
 
 
@@ -161,9 +180,9 @@ def get_civic_clinvar_variation_ids(row: pd.Series) -> set:
     if pd.notna(dbsnp_raw):
         for rsid in str(dbsnp_raw).split(","):
             bare_rsid = rsid.strip().lower().replace("rs", "")
-            variation_id = rsid_to_variationid.get(bare_rsid)
-            if variation_id:
-                ids.add(str(variation_id))
+            variation_ids = rsid_to_variationids.get(bare_rsid)
+            if variation_ids:
+                ids.update(str(vid) for vid in variation_ids)
 
     return ids
 
