@@ -32,6 +32,12 @@ Pulls in everything touching an evidence-backed gene/disease/drug node, except:
       Re-pulling the bare pickle version here and calling
       G.add_edge(u, v, ...) again would REPLACE the richer edge's
       attributes rather than merge them.
+    - GEN-GEN: relabeled undirected, not excluded. A directionality check
+      of the full raw graph found GEN-GEN carries a single relation
+      (INTERACTS_WITH, symmetric by nature) and is natively stored
+      undirected=False — but with ZERO genuinely reciprocal pairs.
+      So GEN-GEN edges are kept in their native (u, v) direction,
+      just marked undirected=True since the relation itself is symmetric.
 
 Inputs:
     - data/processed/evidence_graph_*.pkl (from build_evidence_graph.py)
@@ -170,18 +176,29 @@ print(f"\n[discover] native node labels: {dict(node_labels)}")
 
 t0 = time.time()
 native_edges = []
-native_edge_labels_seen = Counter()
 reached_native_nodes = set()
+n_gen_gen = 0
 for u, v, attrs in OKG.edges(data=True):
     label = attrs.get("label")
     if label in RAW_LABELS_SKIPPED:
         continue
     if u in native_hop_anchor_ids or v in native_hop_anchor_ids:
-        native_edges.append((u, v, dict(attrs)))
-        native_edge_labels_seen[label] += 1
+        attrs = dict(attrs)
+        if label == "GEN-GEN":
+            # Relabeled undirected, kept in native (u, v) direction — see
+            # docstring: a single symmetric relation (INTERACTS_WITH) with
+            # zero genuine reciprocal pairs, so there's nothing to
+            # canonicalize, just a native undirected=False to correct.
+            attrs["undirected"] = True
+            n_gen_gen += 1
+        native_edges.append((u, v, attrs))
         reached_native_nodes.add(u)
         reached_native_nodes.add(v)
 print(f"[scan] done in {time.time() - t0:.1f}s")
+if n_gen_gen:
+    print(f"[native] {n_gen_gen} GEN-GEN edges relabeled undirected=True")
+
+native_edge_labels_seen = Counter(attrs.get("label") for _, _, attrs in native_edges)
 print(
     f"\n[discover] native edge labels reached (skipped labels not counted): "
     f"{dict(native_edge_labels_seen)}"
@@ -245,9 +262,14 @@ for node_id, attrs in other_native_nodes.items():
 for u, v, data in our_kept_edges:
     G.add_edge(u, v, **data)
 
-# Same reasoning: OptimusKG's own raw edge label, so no "optimuskg_native_" prefix
+# Same reasoning: OptimusKG's own raw edge label, so no "optimuskg_native_" prefix.
+# Unlike our_kept_edges (whose attrs already carry "from"/"to" from
+# build_evidence_graph.py), these come straight off the raw OptimusKG
+# pickle and never had them — add them explicitly so every edge in the
+# final graph carries "from"/"to" as real attributes.
 for u, v, attrs in native_edges:
-    G.add_edge(u, v, edge_type=attrs.get("label"), **attrs)
+    edge_data = {**attrs, "from": u, "to": v}
+    G.add_edge(u, v, edge_type=attrs.get("label"), **edge_data)
 
 print(f"\n[assemble] {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
@@ -277,6 +299,7 @@ metadata = {
     "all_evidence_item_nodes": len(all_evidence_item_ids),
     "native_edges_added": len(native_edges),
     "native_edge_labels": {str(k): v for k, v in native_edge_labels_seen.items()},
+    "gen_gen_relabeled_undirected": n_gen_gen,
     "newly_reached_node_labels": {
         str(k): v for k, v in other_node_label_counts.items()
     },

@@ -74,15 +74,15 @@ EDGE_TYPES = [
 # graph_edges_{x}_*.parquet filenames) — only the node_type/edge_type
 # ATTRIBUTE VALUES stored on the graph itself follow OptimusKG's own
 # 3-letter node / 3-letter-dash-3-letter edge convention. Direction
-# (source-first) matches each table's own already-established source/
-# target columns, which for gene_drug ("DRG-GEN") and drug_disease
+# (from-first) matches each table's own already-established from/
+# to columns, which for gene_drug ("DRG-GEN") and drug_disease
 # ("DRG-DIS") already matches OptimusKG's native storage direction (Phase 4
 # deliberately chose those directions for that reason). The one exception:
 # gene_disease becomes "GEN-DIS" (gene-first, matching its actual
-# source=gene column), not OptimusKG's native "DIS-GEN" (disease-first) —
+# from=gene column), not OptimusKG's native "DIS-GEN" (disease-first) —
 # Phase 3 built that table gene-first to match the spec doc's prose
 # ordering, and relabeling it "DIS-GEN" without also flipping its columns
-# would make the label lie about what source/target actually mean.
+# would make the label lie about what from/to actually mean.
 NODE_TYPE_LABELS = {
     "gene": "GEN",
     "disease": "DIS",
@@ -137,9 +137,13 @@ for node_type, records in node_records.items():
 
 for edge_type, records in edge_records.items():
     for row in records:
-        source = row.pop("source")
-        target = row.pop("target")
-        G.add_edge(source, target, edge_type=EDGE_TYPE_LABELS[edge_type], **row)
+        # "from"/"to" are read but NOT popped: they stay in row so **row
+        # also stores them as real edge attributes, not just positionally
+        # via G.add_edge(u, v, ...) — lets an edge's endpoints be read
+        # straight off its attribute dict without reaching into the (u, v)
+        # tuple networkx wraps it in.
+        from_id, to_id = row["from"], row["to"]
+        G.add_edge(from_id, to_id, edge_type=EDGE_TYPE_LABELS[edge_type], **row)
 
 print(f"\n[assemble] {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
@@ -198,12 +202,12 @@ variant_gene_path = find_latest_file(
 )
 variant_to_gene = {}
 for row in pl.read_parquet(variant_gene_path).to_dicts():
-    variant_to_gene.setdefault(row["source"], set()).add(row["target"])
+    variant_to_gene.setdefault(row["from"], set()).add(row["to"])
 
 
 def validate_variant_evidence() -> None:
-    """Check 1: does the variant's VARIANT-GENE target overlap that same
-    evidence item's own GENE-EVIDENCE target(s)?"""
+    """Check 1: does the variant's VARIANT-GENE "to" overlap that same
+    evidence item's own GENE-EVIDENCE "to"(s)?"""
     variant_evidence_path = find_latest_file(
         PROCESSED_DIR, "graph_edges_variant_evidence_*.parquet"
     )
@@ -211,7 +215,7 @@ def validate_variant_evidence() -> None:
     no_gene = 0
     rows = pl.read_parquet(variant_evidence_path).to_dicts()
     for row in rows:
-        variant_id, evidence_id = row["source"], row["target"]
+        variant_id, evidence_id = row["from"], row["to"]
         variant_genes = variant_to_gene.get(variant_id)
         if not variant_genes:
             no_gene += 1
@@ -229,7 +233,7 @@ def validate_variant_evidence() -> None:
 def validate_projected_vs_disease_evidence(edge_type: str, evidence_field: str) -> None:
     """Does a projected edge's own evidence records point back
     to evidence items whose own disease_node_id actually matches the
-    edge's target disease? This validates derive_projected_edges' implementation."""
+    edge's to disease? This validates derive_projected_edges' implementation."""
     path = find_latest_file(PROCESSED_DIR, f"graph_edges_{edge_type}_*.parquet")
     rows = pl.read_parquet(path).to_dicts()
     n_checked = 0
@@ -238,12 +242,12 @@ def validate_projected_vs_disease_evidence(edge_type: str, evidence_field: str) 
         for record in row[evidence_field]:
             n_checked += 1
             actual_disease = evidence_id_to_disease.get(record["id"])
-            if actual_disease != row["target"]:
+            if actual_disease != row["to"]:
                 mismatches += 1
     print(
         f"[validation] {EDGE_TYPE_LABELS[edge_type]} vs DIS-EVI: "
         f"{mismatches} / {n_checked} evidence-item references point to a "
-        f"different disease than the edge's own target"
+        f"different disease than the edge's own to"
     )
 
 

@@ -21,7 +21,7 @@ conflict risk in combining CIViC's claim with it):
 Inputs:
     - data/processed/graph_nodes_evidence_item_*.parquet (from save_graph_nodes.py)
     - data/raw/optimuskg/edges/disease_gene_edges.parquet
-      (from save_optimuskg_disease_gene_edges.py)
+      (from save_optimuskg_edges.py)
 Outputs:
     - data/processed/graph_edges_variant_drug_<date>.parquet
     - data/processed/graph_edges_gene_disease_<date>.parquet
@@ -81,7 +81,7 @@ def derive_projected_edges(
         pairs.groupby([entity_col_a, entity_col_b], group_keys=False)
         .apply(_agg, include_groups=False)
         .reset_index()
-        .rename(columns={entity_col_a: "source", entity_col_b: "target"})
+        .rename(columns={entity_col_a: "from", entity_col_b: "to"})
     )
     return grouped
 
@@ -92,14 +92,14 @@ def merge_with_other_origin(
     other_pairs: pd.DataFrame,
     other_origin_name: str,
 ) -> pd.DataFrame:
-    """Outer-merges a CIViC-projected edge set (source, target,
-    evidence_items, n_evidence_items) with another set of (source, target)
+    """Outer-merges a CIViC-projected edge set (from, to,
+    evidence_items, n_evidence_items) with another set of (from, to)
     pairs from a second, independent origin, producing one row per pair
     with an origin list: [civic_origin_name] only, [other_origin_name]
     only, or both when they agree."""
     merged = civic_edges.merge(
-        other_pairs[["source", "target"]].drop_duplicates().assign(_other=True),
-        on=["source", "target"],
+        other_pairs[["from", "to"]].drop_duplicates().assign(_other=True),
+        on=["from", "to"],
         how="outer",
     )
     merged["evidence_items"] = merged["evidence_items"].apply(
@@ -118,7 +118,7 @@ def merge_with_other_origin(
         return sorted(origins)
 
     merged["origin"] = merged.apply(_origin, axis=1)
-    return merged[["source", "target", "origin", "evidence_items", "n_evidence_items"]]
+    return merged[["from", "to", "origin", "evidence_items", "n_evidence_items"]]
 
 
 # %%
@@ -154,10 +154,10 @@ dis_gen = pl.read_parquet(dis_gen_path).to_pandas()
 print(f"[setup] loaded {len(dis_gen)} OptimusKG DIS-GEN edges from {dis_gen_path}")
 
 # DIS-GEN edges are stored disease -> gene (e.g. "DOID_0050890 -> ENSG00000000971");
-# flip to (gene, disease) to match this edge table's own source=gene, target=disease
+# flip to (gene, disease) to match this edge table's own from=gene, to=disease
 # convention (GENE-DISEASE name order).
 optimuskg_gene_disease_pairs = pd.DataFrame(
-    {"source": dis_gen["target"], "target": dis_gen["source"]}
+    {"from": dis_gen["to"], "to": dis_gen["from"]}
 ).drop_duplicates()
 print(
     f"[GENE-DISEASE] {len(optimuskg_gene_disease_pairs)} unique (gene, disease) "

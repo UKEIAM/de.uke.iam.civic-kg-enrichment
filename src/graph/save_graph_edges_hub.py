@@ -91,8 +91,8 @@ variant_nodes = _load_node_table("variant")
 # ---------------------------------------------------------------------------
 
 ## Convention:
-## "source" is always the non-evidence-item entity (gene/disease/drug/variant),
-## "target" is the Evidence item ("source" is the more specific/leaf node).
+## "from" is always the non-evidence-item entity (gene/disease/drug/variant),
+## "to" is the Evidence item ("from" is the more specific/leaf node).
 
 
 def build_scalar_hub_edges(
@@ -101,7 +101,7 @@ def build_scalar_hub_edges(
     edges = (
         df[[id_col, "id"]]
         .dropna(subset=[id_col])
-        .rename(columns={id_col: "source", "id": "target"})
+        .rename(columns={id_col: "from", "id": "to"})
     )
     edges["undirected"] = True
     print(f"[{edge_name}] {len(edges)} edges")
@@ -110,7 +110,7 @@ def build_scalar_hub_edges(
 
 def build_list_hub_edges(df: pd.DataFrame, id_col: str, edge_name: str) -> pd.DataFrame:
     edges = df[[id_col, "id"]].explode(id_col).dropna(subset=[id_col])
-    edges = edges.rename(columns={id_col: "source", "id": "target"})
+    edges = edges.rename(columns={id_col: "from", "id": "to"})
     edges["undirected"] = True
     print(f"[{edge_name}] {len(edges)} edges")
     return edges.reset_index(drop=True)
@@ -199,8 +199,9 @@ variant_nodes["_resolved_gene_node_id"] = variant_nodes["gene_id_entrez"].apply(
 
 variant_gene_edges = variant_nodes.dropna(subset=["_resolved_gene_node_id"])[
     ["id", "_resolved_gene_node_id"]
-].rename(columns={"id": "source", "_resolved_gene_node_id": "target"})
+].rename(columns={"id": "from", "_resolved_gene_node_id": "to"})
 variant_gene_edges["undirected"] = True
+variant_gene_edges["relation"] = "LOCATED_IN"
 variant_gene_edges = variant_gene_edges.reset_index(drop=True)
 
 n_variant_gene_resolved = len(variant_gene_edges)
@@ -265,7 +266,7 @@ def derive_projected_edges(
         pairs.groupby([entity_col_a, entity_col_b], group_keys=False)
         .apply(_agg, include_groups=False)
         .reset_index()
-        .rename(columns={entity_col_a: "source", entity_col_b: "target"})
+        .rename(columns={entity_col_a: "from", entity_col_b: "to"})
     )
     return grouped
 
@@ -276,14 +277,14 @@ def merge_with_other_origin(
     other_pairs: pd.DataFrame,
     other_origin_name: str,
 ) -> pd.DataFrame:
-    """Outer-merges a CIViC-projected edge set (source, target,
-    evidence_items, n_evidence_items) with another set of (source, target)
+    """Outer-merges a CIViC-projected edge set (from, to,
+    evidence_items, n_evidence_items) with another set of (from, to)
     pairs from a second, independent origin, producing one row per pair
     with an origin list: [civic_origin_name] only, [other_origin_name]
     only, or both when they agree."""
     merged = civic_edges.merge(
-        other_pairs[["source", "target"]].drop_duplicates().assign(_other=True),
-        on=["source", "target"],
+        other_pairs[["from", "to"]].drop_duplicates().assign(_other=True),
+        on=["from", "to"],
         how="outer",
     )
     merged["evidence_items"] = merged["evidence_items"].apply(
@@ -302,7 +303,7 @@ def merge_with_other_origin(
         return sorted(origins)
 
     merged["origin"] = merged.apply(_origin, axis=1)
-    return merged[["source", "target", "origin", "evidence_items", "n_evidence_items"]]
+    return merged[["from", "to", "origin", "evidence_items", "n_evidence_items"]]
 
 
 variant_disease_civic = derive_projected_edges(
@@ -314,7 +315,7 @@ phenotype_pairs = variant_nodes[["id", "resolved_phenotype_disease_ids"]].explod
 )
 phenotype_pairs = phenotype_pairs.dropna(subset=["resolved_phenotype_disease_ids"])
 phenotype_pairs = phenotype_pairs.rename(
-    columns={"id": "source", "resolved_phenotype_disease_ids": "target"}
+    columns={"id": "from", "resolved_phenotype_disease_ids": "to"}
 )
 
 variant_disease_edges = merge_with_other_origin(
@@ -345,7 +346,7 @@ print("[hub] wrote VARIANT-DISEASE edge table")
 #    the variant may not have resolved to a gene at all.
 # ---------------------------------------------------------------------------
 
-variant_to_gene = variant_gene_edges.groupby("source")["target"].apply(set).to_dict()
+variant_to_gene = variant_gene_edges.groupby("from")["to"].apply(set).to_dict()
 # gene_node_ids comes back from pl.read_parquet(...).to_pandas() as a numpy
 # array, not a Python list. set(ids) works fine on either, but an
 # isinstance(ids, list) guard would silently treat every row as empty.
@@ -356,7 +357,7 @@ evidence_to_genes = evidence_item_nodes.set_index("id")["gene_node_ids"].apply(
 mismatches = 0
 no_variant_gene = 0
 for _, row in variant_evidence_edges.iterrows():
-    variant_id, evidence_id = row["source"], row["target"]
+    variant_id, evidence_id = row["from"], row["to"]
     variant_genes = variant_to_gene.get(variant_id)
     if not variant_genes:
         no_variant_gene += 1
