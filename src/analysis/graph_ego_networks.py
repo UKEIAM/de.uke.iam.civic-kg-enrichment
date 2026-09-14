@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
 """
-Ego-network figures for 2-3 representative evidence items; the qualitative
-counterpart to graph_centrality.py/graph_communities.py's quantitative
-reports. Runs against evidence_backed_expanded_graph_*.pkl, not the
-cancer-scoped graph: the spec designates the expanded graph specifically for
-"Bloom exploration and qualitative figures," the cancer-scoped graph for the
-curated-vs-not comparison analyses.
-
-The neighborhood-expansion helper below is written fresh from the
-requirement, not adopted from the exploration notebook's own (unvalidated)
-version — see build_ego_network()'s docstring for why successors AND
-predecessors are the right walk regardless of where the idea first appeared.
+Generic ego-network picker: finds 2-3 representative evidence items (degree
+in [4,10], diverse neighbor-type signature) and renders each as an
+interactive pyvis figure. Runs against evidence_backed_expanded_graph_*.pkl.
 
 Inputs:
     - data/processed/evidence_backed_expanded_graph_*.pkl (from build_expanded_evidence_graph.py)
@@ -32,6 +24,7 @@ import networkx as nx
 from pyvis.network import Network
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
+from graph_viz import NODE_COLORS, node_label
 from load_files import find_latest_file
 
 OUT_DIR = Path("data/processed/ego_networks")
@@ -41,14 +34,6 @@ N_REPRESENTATIVE = 3
 # Degree band for "representative": big enough to show real context, small
 # enough that the figure stays readable rather than becoming a hairball.
 MIN_DEGREE, MAX_DEGREE = 4, 10
-
-NODE_COLORS = {
-    "GEN": "#0E7A6F",
-    "DIS": "#33578C",
-    "DRG": "#1E8CA6",
-    "VAR": "#A9781F",
-    "EVI": "#B0502B",
-}
 
 
 def build_ego_network(G: nx.DiGraph, center_id: str, hops: int = 1) -> nx.DiGraph:
@@ -71,13 +56,6 @@ def build_ego_network(G: nx.DiGraph, center_id: str, hops: int = 1) -> nx.DiGrap
         visited.update(next_frontier)
         frontier = next_frontier
     return G.subgraph(visited).copy()
-
-
-def node_label(node_id: str, attrs: dict) -> str:
-    for key in ("hgvs_name", "name", "symbol", "gene_symbol"):
-        if attrs.get(key):
-            return str(attrs[key])
-    return node_id
 
 
 def render_ego_network(G: nx.DiGraph, center_id: str, out_path: Path) -> None:
