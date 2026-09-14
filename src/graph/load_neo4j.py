@@ -264,15 +264,29 @@ def write_nodes(driver, label: str, rows: list[dict]) -> None:
 
 
 def write_relationships(driver, rel_type: str, rows: list[dict]) -> None:
+    """MERGE on (a, b, type) alone would collapse every row sharing the
+    same (from, to) under this type into one relationship — wrong for
+    CIVIC_EVIDENCE specifically, where a single node pair can legitimately
+    carry several distinct evidence citations (one DRG-GEN sample edge had
+    19). Each row gets a merge_key that MERGE actually keys on: the
+    citation's own id (evidence_items/civic_evidence entries always carry
+    one) where present, so distinct citations become distinct
+    relationships; falling back to "from->to" for the handful of types
+    that can only ever produce one relationship per pair anyway (safe —
+    nothing to disambiguate there), so reruns stay idempotent."""
+    prepared = [
+        {**row, "merge_key": row["props"].get("id", f"{row['from']}->{row['to']}")}
+        for row in rows
+    ]
     query = (
         f"UNWIND $rows AS row "
         f"MATCH (a {{id: row.from}}), (b {{id: row.to}}) "
-        f"MERGE (a)-[r:{rel_type}]->(b) "
+        f"MERGE (a)-[r:{rel_type} {{_merge_key: row.merge_key}}]->(b) "
         f"SET r += row.props"
     )
     with driver.session() as session:
-        for i in range(0, len(rows), BATCH_SIZE):
-            batch = rows[i : i + BATCH_SIZE]
+        for i in range(0, len(prepared), BATCH_SIZE):
+            batch = prepared[i : i + BATCH_SIZE]
             session.execute_write(lambda tx, b=batch: tx.run(query, rows=b))
 
 
@@ -282,6 +296,27 @@ def ensure_constraints(driver) -> None:
             session.run(
                 f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
             )
+
+
+def get_existing_counts(driver) -> tuple[dict[str, int], dict[str, int]]:
+    """Resume support: if a previous run was interrupted mid-load (writes
+    are batched, so a kill mid-batch leaves earlier batches durably
+    committed), skip any label/relationship type whose live count already
+    matches what this run would write, rather than resending it. Every
+    write is a MERGE, so redoing a partially-loaded type is still correct,
+    just slower — this is purely a speed-up, not a correctness requirement."""
+    with driver.session() as session:
+        node_counts = {
+            r["label"]: r["c"]
+            for r in session.run(
+                "MATCH (n) RETURN labels(n)[0] AS label, count(n) AS c"
+            )
+        }
+        rel_counts = {
+            r["t"]: r["c"]
+            for r in session.run("MATCH ()-[r]->() RETURN type(r) AS t, count(r) AS c")
+        }
+    return node_counts, rel_counts
 
 
 # %%
@@ -343,15 +378,29 @@ else:
     ensure_constraints(driver)
     print("[write] uniqueness constraints ensured")
 
+    existing_node_counts, existing_rel_counts = get_existing_counts(driver)
+    print(
+        f"[resume] {len(existing_node_counts)} labels / {len(existing_rel_counts)} "
+        f"relationship types already present on the live instance"
+    )
+
     t0 = time.time()
     for label, rows in nodes_by_label.items():
+        if existing_node_counts.get(label) == len(rows):
+            print(f"[skip] :{label}: {len(rows)} nodes already loaded")
+            continue
         write_nodes(driver, label, rows)
         print(f"[write] :{label}: {len(rows)} nodes")
     for rel_type, rows in rels_by_type.items():
+        if existing_rel_counts.get(rel_type) == len(rows):
+            print(f"[skip] :{rel_type}: {len(rows)} relationships already loaded")
+            continue
         write_relationships(driver, rel_type, rows)
         print(f"[write] :{rel_type}: {len(rows)} relationships")
     print(f"[write] done in {time.time() - t0:.1f}s")
 
     driver.close()
+
+print("\n[done]")
 
 # %%
