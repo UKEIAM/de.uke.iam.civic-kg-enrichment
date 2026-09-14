@@ -4,20 +4,12 @@ Centrality, curated vs. not: does having a CIViC/ClinVar evidence item track
 structural importance in the cancer-scoped graph, or is curation independent
 of a node's position in the graph? Or, "are curated nodes typically more central"?
 
-Direction-sensitive algorithms need an undirected view:
-G_und = G.to_undirected()
-is built once and used for degree/betweenness; weak connectivity is the one
-thing checked on the raw DiGraph (direction genuinely doesn't matter for it
-either way, but nx.connected_components() isn't implemented for a DiGraph at
-all, so it has to be nx.number_weakly_connected_components()).
-
-Betweenness is exact-infeasible at cancer_scoped_graph's scale (~5M edges,
-O(V*E) per node); BETWEENNESS_SAMPLE_K below controls the k-sample
+BETWEENNESS_SAMPLE_K: controls the k-sample
 approximation (nx.betweenness_centrality(..., k=...)); a real analysis run
 can raise it at the cost of runtime.
 
 Code flow:
-1. build the undirected view
+1. build the undirected view (G_und = G.to_undirected())
 2. sanity-check that the graph is actually one coherent structure, not scattered islands (betweeness)
 3. compute two different flavors of "how structurally important is this node" (raw connection count, and bridge-between-others count)
 4. and then, for each entity type, statistically test whether "CIViC curated this" lines up with "this node is structurally important,"
@@ -26,17 +18,22 @@ or whether curation is basically independent of a node's position in the network
 Inputs:
     - data/processed/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
 Outputs:
-    - printed report only (no file output)
+    - printed report
+    - data/processed/graph_centrality/graph_centrality_<date>.json (same
+      figures the report prints, structured for downstream reuse)
 
 Usage:
     python src/analysis/graph_centrality.py
 """
 
 # %%
+import json
 import os
 import pickle
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 import networkx as nx
 from scipy import stats
@@ -46,6 +43,9 @@ from load_files import find_latest_file
 
 BETWEENNESS_SAMPLE_K = 100
 RANDOM_SEED = 42
+
+OUT_DIR = Path("data/processed/graph_centrality")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # %%
 # ---------------------------------------------------------------------------
@@ -81,6 +81,21 @@ print(
     f"({100 * len(largest_wcc) / G.number_of_nodes():.1f}%)"
 )
 
+report = {
+    "built_at": datetime.now(timezone.utc).isoformat(),
+    "graph_snapshot": Path(graph_path).name,
+    "n_nodes": G.number_of_nodes(),
+    "n_edges": G.number_of_edges(),
+    "betweenness_sample_k": BETWEENNESS_SAMPLE_K,
+    "random_seed": RANDOM_SEED,
+    "connectivity": {
+        "n_weakly_connected_components": n_wcc,
+        "largest_wcc_size": len(largest_wcc),
+        "largest_wcc_fraction": len(largest_wcc) / G.number_of_nodes(),
+    },
+    "by_node_type": {},
+}
+
 # %%
 # ---------------------------------------------------------------------------
 # 2. Degree (total, undirected) and approximate betweenness.
@@ -108,42 +123,67 @@ print(
 # ---------------------------------------------------------------------------
 
 
+def _median(xs):
+    s = sorted(xs)
+    mid = len(s) // 2
+    return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
+
+
+# Betweenness values are tiny fractions at this graph's scale (~192k nodes);
+# use scientific notation for anything below the 2-decimal threshold.
+def _fmt(x: float) -> str:
+    return f"{x:.2e}" if abs(x) < 0.01 and x != 0 else f"{x:.2f}"
+
+
 def mann_whitney_report(
     label: str, values: dict, curated_ids: set, other_ids: set
-) -> None:
+) -> dict | None:
     curated_vals = [values[n] for n in curated_ids if n in values]
     other_vals = [values[n] for n in other_ids if n in values]
     if not curated_vals or not other_vals:
         print(f"  [{label}] skipped - one group is empty")
-        return
+        return None
 
     result = stats.mannwhitneyu(curated_vals, other_vals, alternative="two-sided")
-    u = result.statistic
-    p = result.pvalue
+    u = float(result.statistic)
+    p = float(result.pvalue)
     prob_superiority = u / (len(curated_vals) * len(other_vals))
 
-    def _median(xs):
-        s = sorted(xs)
-        mid = len(s) // 2
-        return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
-
-    # Betweenness values are tiny fractions at this graph's scale (~192k
-    # nodes); use scientific notation for anything below the 2-decimal threshold.
-    def _fmt(x: float) -> str:
-        return f"{x:.2e}" if abs(x) < 0.01 and x != 0 else f"{x:.2f}"
+    curated_median = _median(curated_vals)
+    curated_mean = sum(curated_vals) / len(curated_vals)
+    other_median = _median(other_vals)
+    other_mean = sum(other_vals) / len(other_vals)
 
     print(
-        f"  [{label}] curated: n={len(curated_vals)}, median={_fmt(_median(curated_vals))}, "
-        f"mean={_fmt(sum(curated_vals) / len(curated_vals))}"
+        f"  [{label}] curated: n={len(curated_vals)}, median={_fmt(curated_median)}, "
+        f"mean={_fmt(curated_mean)}"
     )
     print(
-        f"  [{label}] not curated: n={len(other_vals)}, median={_fmt(_median(other_vals))}, "
-        f"mean={_fmt(sum(other_vals) / len(other_vals))}"
+        f"  [{label}] not curated: n={len(other_vals)}, median={_fmt(other_median)}, "
+        f"mean={_fmt(other_mean)}"
     )
     print(
         f"  [{label}] Mann-Whitney U p={p:.3e}, U/(n1*n2)={prob_superiority:.3f} "
         f"(probability a random curated node outranks a random non-curated one)"
     )
+
+    return {
+        "curated": {
+            "n": len(curated_vals),
+            "median": curated_median,
+            "mean": curated_mean,
+        },
+        "not_curated": {
+            "n": len(other_vals),
+            "median": other_median,
+            "mean": other_mean,
+        },
+        "mannwhitneyu": {
+            "u_statistic": u,
+            "p_value": p,
+            "prob_superiority": prob_superiority,
+        },
+    }
 
 
 for node_type in ("GEN", "DIS", "DRG", "VAR"):
@@ -154,8 +194,90 @@ for node_type in ("GEN", "DIS", "DRG", "VAR"):
         f"\n[{node_type}] {len(curated_ids)} curated (in_civic_evidence_item=True), "
         f"{len(other_ids)} not"
     )
-    mann_whitney_report("degree", degree, curated_ids, other_ids)
-    mann_whitney_report("betweenness", betweenness, curated_ids, other_ids)
+    degree_result = mann_whitney_report("degree", degree, curated_ids, other_ids)
+    betweenness_result = mann_whitney_report(
+        "betweenness", betweenness, curated_ids, other_ids
+    )
+    report["by_node_type"][node_type] = {
+        "n_curated": len(curated_ids),
+        "n_not_curated": len(other_ids),
+        "degree": degree_result,
+        "betweenness": betweenness_result,
+    }
+
+# %%
+# ---------------------------------------------------------------------------
+# 4. Evidence items themselves: which EVI nodes are most central, and what
+#    do the entities they directly cite look like? EVI isn't part of the
+#    curated-vs-not comparison above (every EVI is definitionally
+#    curated), but an EVI's own degree is capped by how many entities it
+#    cites (usually a handful) — a high-betweenness EVI is the more
+#    informative number: it means this specific evidence item sits on an
+#    unusually large share of shortest paths through the graph, i.e. it's
+#    a structural bridge, not just a well-connected record.
+# ---------------------------------------------------------------------------
+
+TOP_EVI_N = 10
+evi_ids = [n for n, a in G.nodes(data=True) if a.get("node_type") == "EVI"]
+
+
+def node_short_label(node_id: str) -> str:
+    attrs = G.nodes[node_id]
+    for key in ("symbol", "name", "hgvs_name"):
+        if attrs.get(key):
+            return str(attrs[key])
+    return node_id
+
+
+def evi_neighbors(eid: str) -> list[dict]:
+    """Every node this EVI directly connects to, with its own degree —
+    sorted by degree desc, so the most central directly-cited entity is
+    listed first."""
+    neighbor_ids = set(G.successors(eid)) | set(G.predecessors(eid))
+    rows = [
+        {
+            "id": n,
+            "node_type": G.nodes[n].get("node_type"),
+            "label": node_short_label(n),
+            "degree": degree.get(n, 0),
+        }
+        for n in neighbor_ids
+    ]
+    return sorted(rows, key=lambda r: -r["degree"])
+
+
+top_evi_by_degree = sorted(evi_ids, key=lambda n: -degree.get(n, 0))[:TOP_EVI_N]
+top_evi_by_betweenness = sorted(evi_ids, key=lambda n: -betweenness.get(n, 0))[:TOP_EVI_N]
+
+print(f"\n[EVI] {len(evi_ids)} evidence item nodes")
+print(f"\n[EVI] top {TOP_EVI_N} by degree:")
+for eid in top_evi_by_degree:
+    print(f"  {eid}: degree={degree[eid]}")
+print(f"\n[EVI] top {TOP_EVI_N} by betweenness:")
+for eid in top_evi_by_betweenness:
+    print(f"  {eid}: betweenness={betweenness[eid]:.3e}, degree={degree[eid]}")
+
+report["evidence_items"] = {
+    "n_evi_nodes": len(evi_ids),
+    "top_by_degree": [
+        {"evi": eid, "degree": degree[eid], "neighbors": evi_neighbors(eid)}
+        for eid in top_evi_by_degree
+    ],
+    "top_by_betweenness": [
+        {
+            "evi": eid,
+            "betweenness": betweenness[eid],
+            "degree": degree[eid],
+            "neighbors": evi_neighbors(eid),
+        }
+        for eid in top_evi_by_betweenness
+    ],
+}
+
+report_path = OUT_DIR / f"graph_centrality_{datetime.now(timezone.utc):%Y-%m-%d}.json"
+with open(report_path, "w") as f:
+    json.dump(report, f, indent=2)
+print(f"\n[save] wrote {report_path}")
 
 print("\n[done]")
 
