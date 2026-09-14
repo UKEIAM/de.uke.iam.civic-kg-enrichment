@@ -8,28 +8,31 @@ ClinVar curation hasn't reached yet, even though it's structurally as
 connected as curated regions.
 
 igraph/leidenalg, not networkx's own louvain_communities: compiled C
-implementation, needed at this graph's scale (~192k nodes / ~5.1M edges) —
-a pure-Python community-detection pass here would be far slower.
+implementation, needed at this graph's scale (~192k nodes / ~5.1M edges)
 
 Inputs:
     - data/processed/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
 Outputs:
-    - printed report only (no file output)
+    - printed report
+    - data/processed/graph_communities/graph_communities_<date>.json (same
+      figures the report prints, structured for downstream reuse)
 
 Usage:
     python src/analysis/graph_communities.py
 """
 
 # %%
+import json
 import os
 import pickle
 import sys
 import time
 from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 
 import igraph as ig
 import leidenalg
-import networkx as nx
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
 from load_files import find_latest_file
@@ -37,6 +40,9 @@ from load_files import find_latest_file
 RANDOM_SEED = 42
 # A community below this size is too small
 MIN_COMMUNITY_SIZE_FOR_FLAGGING = 5
+
+OUT_DIR = Path("data/processed/graph_communities")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # %%
 # ---------------------------------------------------------------------------
@@ -86,6 +92,22 @@ print(
     f"smallest={min(community_sizes.values())}, "
     f"median={sorted(community_sizes.values())[len(community_sizes) // 2]}"
 )
+
+report = {
+    "built_at": datetime.now(timezone.utc).isoformat(),
+    "graph_snapshot": Path(graph_path).name,
+    "n_nodes": G.number_of_nodes(),
+    "n_edges": G.number_of_edges(),
+    "random_seed": RANDOM_SEED,
+    "min_community_size_for_flagging": MIN_COMMUNITY_SIZE_FOR_FLAGGING,
+    "leiden": {
+        "n_communities": len(partition),
+        "modularity": modularity,
+        "size_largest": max(community_sizes.values()),
+        "size_smallest": min(community_sizes.values()),
+        "size_median": sorted(community_sizes.values())[len(community_sizes) // 2],
+    },
+}
 
 # %%
 # ---------------------------------------------------------------------------
@@ -140,8 +162,33 @@ print(
 print(
     "\n[structural gap] 10 largest all-gap communities (comm_id, size, eligible_nodes):"
 )
-for comm, size, eligible in sorted(all_gap, key=lambda x: -x[1])[:10]:
+top_all_gap = sorted(all_gap, key=lambda x: -x[1])[:10]
+for comm, size, eligible in top_all_gap:
     print(f"  {comm}: size={size}, eligible={eligible}")
+
+report["structural_gap"] = {
+    "n_communities_considered": len(mixed_fractions),
+    "n_all_curated": len(all_curated),
+    "n_all_gap": len(all_gap),
+    "mean_curated_fraction": sum(mixed_fractions) / len(mixed_fractions),
+    "all_curated_communities": [
+        {"community_id": comm, "size": size, "eligible": eligible}
+        for comm, size, eligible in all_curated
+    ],
+    "all_gap_communities": [
+        {"community_id": comm, "size": size, "eligible": eligible}
+        for comm, size, eligible in all_gap
+    ],
+    "top_10_largest_all_gap_communities": [
+        {"community_id": comm, "size": size, "eligible": eligible}
+        for comm, size, eligible in top_all_gap
+    ],
+}
+
+report_path = OUT_DIR / f"graph_communities_{datetime.now(timezone.utc):%Y-%m-%d}.json"
+with open(report_path, "w") as f:
+    json.dump(report, f, indent=2)
+print(f"\n[save] wrote {report_path}")
 
 print("\n[done]")
 
