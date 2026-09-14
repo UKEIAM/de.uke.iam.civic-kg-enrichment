@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import optimuskg
+import requests
 
 OUTPUT_DIR = Path("data/raw/optimuskg/")
 
@@ -19,6 +20,19 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     pickle_path = OUTPUT_DIR / f"optimuskg_lcc_graph_{date_str}.pkl"
+
+    # Patch requests.get to set a default User-Agent header (avoid 403 Forbidden errors)
+    _orig_get = requests.get
+
+    def _patched_get(*args, **kwargs):
+        headers = kwargs.pop("headers", {}) or {}
+        headers.setdefault(
+            "User-Agent",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        )
+        return _orig_get(*args, headers=headers, **kwargs)
+
+    requests.get = _patched_get
 
     def save_optimuskg_to_pickle():
         if pickle_path.exists():
