@@ -20,3 +20,7 @@ matplotlib==3.10.1
 # Neo4j load
 neo4j==5.28.1
 python-dotenv==1.0.1
+
+# App
+streamlit==1.60.0
+st-link-analysis==0.4.0
