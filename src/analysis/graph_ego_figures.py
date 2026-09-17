@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 """
-4 purpose-built figures:
+5 purpose-built figures:
 1. mechanism of action (hit/miss pair)
 2. drug safety/usage
 3. disease hierarchy
-4. gene-disease structural gap.
+4. gene-disease structural gap
+5. drug-drug interaction safety flag.
 
 These source from cancer_scoped_graph_*.pkl
 
 Output is static and vector (SVG + PDF), not the generic picker's
 interactive HTML;
 relation labels and the node-type legend are baked directly into the
-image. Shared node-type color/label helpers live in src/utils/graph_viz.py.
+image. Shared node-type color/label/tooltip/legend/export helpers live in
+src/utils/graph_viz.py — this file keeps only what's specific to an
+EVI-centered shell-layout figure (draw_ego_panel, other_resolved_nodes,
+has_relation_at_hop) and the 5 build_figureN functions themselves.
 
-Figures 1-3's example evidence items (FIG1_HIT_EVI/FIG1_MISS_EVI/
-FIG2_EVI/FIG3_EVI below) are hardcoded picks from the candidate pools
-find_figure_candidates.py surveys — run that script first to see the
+Figures 1-3 and 5's example evidence items (FIG1_HIT_EVI/FIG1_MISS_EVI/
+FIG2_EVI/FIG3_EVI/FIG5_EVI below) are hardcoded picks from the candidate
+pools find_figure_candidates.py surveys — run that script first to see the
 full pool and choose a different example. Figure 4 needs no manual pick:
 its own search is deterministic and runs live below.
 
 Inputs:
     - data/processed/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
 Outputs:
-    - data/processed/ego_networks/fig{1,2,3,4}_*.{svg,pdf} (the print figures)
-    - data/processed/ego_networks/fig{1,2,3,4}_*.html (interactive pyvis
+    - data/processed/ego_networks/fig{1,2,3,4,5}_*.{svg,pdf} (the print figures)
+    - data/processed/ego_networks/fig{1,2,3,4,5}_*.html (interactive pyvis
       counterparts of the same subgraphs, for exploration)
 
 Usage:
@@ -33,7 +37,6 @@ Usage:
 # %%
 import os
 import pickle
-import re
 import sys
 from pathlib import Path
 
@@ -42,62 +45,29 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import networkx as nx
-from matplotlib.lines import Line2D
-from pyvis.network import Network
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
-from graph_viz import NODE_COLORS, node_label
+from graph_viz import (
+    CONTEXT_COLOR,
+    GAP_COLOR,
+    HIGHLIGHT_COLOR,
+    NODE_COLORS,
+    NODE_MARKERS,
+    NODE_TYPE_ORDER,
+    context_legend_handle,
+    edge_legend_handle,
+    node_label,
+    node_legend_handles,
+    paper_node_label,
+    render_interactive_panel,
+    save_static_figure,
+)
 from load_files import find_latest_file
 
 OUT_DIR = Path("data/processed/ego_networks")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-NODE_TYPE_LABELS = {
-    "GEN": "Gene",
-    "DIS": "Disease",
-    "DRG": "Drug",
-    "VAR": "Variant",
-    "EVI": "Evidence item",
-    "PHE": "Phenotype",
-}
-# Shape
-NODE_MARKERS = {
-    "GEN": "o",
-    "DIS": "s",
-    "DRG": "D",
-    "VAR": "^",
-    "PHE": "v",
-    "EVI": "*",
-}
-
-HIGHLIGHT_COLOR = "#DC267F"
-CONTEXT_COLOR = "#B0B0B0"  # muted gray for non-highlighted context edges AND nodes
-GAP_COLOR = "#7A7A7A"  # dashed for "structural, not curated" encoding
-
-# Node types drawn in a fixed, consistent order across every figure's
-# legend — filtered per-figure to whichever types actually appear.
-NODE_TYPE_ORDER = ["EVI", "GEN", "DIS", "DRG", "VAR", "PHE"]
-
-
-def paper_node_label(node_id: str, attrs: dict) -> str:
-    """Like node_label() (src/utils/graph_viz.py), but prefers the short
-    symbol over the long descriptive name. A VAR node's own gene_symbol
-    (e.g. "BRAF") isn't a distinguishing label — every variant on the same
-    gene would show the same text — so VAR nodes are labeled from their
-    own hgvs_name instead, trimmed to just the protein change
-    ("p.Val600Glu") when one is present, since the full
-    "NM_004333.6(BRAF):c.1799T>A (p.Val600Glu)" string is too long to sit
-    next to a node marker."""
-    if attrs.get("node_type") == "VAR":
-        hgvs = attrs.get("hgvs_name")
-        if hgvs:
-            match = re.search(r"\(p\.[^)]+\)", hgvs)
-            return match.group(0)[1:-1] if match else str(hgvs)
-        return node_id
-    for key in ("symbol", "gene_symbol", "hgvs_name", "name"):
-        if attrs.get(key):
-            return str(attrs[key])
-    return node_id
+CONTEXT_LABEL = "other entity resolved by this evidence item (not highlighted)"
 
 
 def other_resolved_nodes(evi_attrs: dict, exclude: set, include: set) -> list[str]:
@@ -147,10 +117,7 @@ def has_relation_at_hop(
             if G.nodes[far].get("node_type") != target_type:
                 continue
             edge_data = G.get_edge_data(mid, far) or G.get_edge_data(far, mid)
-            if (
-                relation_value is None
-                or edge_data.get(relation_field) == relation_value
-            ):
+            if relation_value is None or edge_data.get(relation_field) == relation_value:
                 return mid, far
     return None
 
@@ -200,50 +167,28 @@ def draw_ego_panel(
         (u, v) for u, v in sub.edges() if u != v and (u, v) not in highlighted_pairs
     ]
     nx.draw_networkx_edges(
-        sub,
-        pos,
-        edgelist=context_edges,
-        ax=ax,
-        edge_color=CONTEXT_COLOR,
-        width=1.0,
-        arrows=True,
-        arrowsize=8,
-        connectionstyle="arc3,rad=0.05",
+        sub, pos, edgelist=context_edges, ax=ax, edge_color=CONTEXT_COLOR,
+        width=1.0, arrows=True, arrowsize=8, connectionstyle="arc3,rad=0.05",
     )
 
     for h in highlighted_edges:
         style = h.get("style", "solid")
         nx.draw_networkx_edges(
-            sub,
-            pos,
-            edgelist=[(h["u"], h["v"])],
-            ax=ax,
-            edge_color=h.get("color", HIGHLIGHT_COLOR),
-            width=h.get("width", 2.5),
-            style=style,
-            arrows=True,
-            arrowsize=14,
+            sub, pos, edgelist=[(h["u"], h["v"])], ax=ax,
+            edge_color=h.get("color", HIGHLIGHT_COLOR), width=h.get("width", 2.5),
+            style=style, arrows=True, arrowsize=14,
         )
         if h.get("label"):
             nx.draw_networkx_edge_labels(
-                sub,
-                pos,
-                edge_labels={(h["u"], h["v"]): h["label"]},
-                ax=ax,
-                font_size=8,
-                font_color=h.get("color", HIGHLIGHT_COLOR),
+                sub, pos, edge_labels={(h["u"], h["v"]): h["label"]}, ax=ax,
+                font_size=8, font_color=h.get("color", HIGHLIGHT_COLOR),
             )
 
     for s in synthetic_edges or []:
         nx.draw_networkx_edges(
-            sub,
-            pos,
-            edgelist=[(s["u"], s["v"])],
-            ax=ax,
-            edge_color=s.get("color", GAP_COLOR),
-            width=s.get("width", 1.5),
-            style=s.get("style", "dashed"),
-            arrows=False,
+            sub, pos, edgelist=[(s["u"], s["v"])], ax=ax,
+            edge_color=s.get("color", GAP_COLOR), width=s.get("width", 1.5),
+            style=s.get("style", "dashed"), arrows=False,
         )
         if s.get("label"):
             (x0, y0), (x1, y1) = pos[s["u"]], pos[s["v"]]
@@ -260,40 +205,23 @@ def draw_ego_panel(
             rlen = (rx**2 + ry**2) ** 0.5 or 1.0
             offset = 0.15
             ax.text(
-                mx + rx / rlen * offset,
-                my + ry / rlen * offset,
-                s["label"],
-                fontsize=7,
-                style="italic",
-                color=s.get("color", GAP_COLOR),
-                ha="center",
-                va="center",
-                backgroundcolor="white",
+                mx + rx / rlen * offset, my + ry / rlen * offset, s["label"],
+                fontsize=7, style="italic", color=s.get("color", GAP_COLOR),
+                ha="center", va="center", backgroundcolor="white",
             )
 
     for node_type, marker in NODE_MARKERS.items():
-        nodes_of_type = [
-            n for n in sub.nodes() if sub.nodes[n].get("node_type") == node_type
-        ]
+        nodes_of_type = [n for n in sub.nodes() if sub.nodes[n].get("node_type") == node_type]
         if not nodes_of_type:
             continue
         sizes = [700 if n == center_id else 260 for n in nodes_of_type]
         colors = [
-            CONTEXT_COLOR
-            if n in context_node_ids
-            else NODE_COLORS.get(node_type, "#828C97")
+            CONTEXT_COLOR if n in context_node_ids else NODE_COLORS.get(node_type, "#828C97")
             for n in nodes_of_type
         ]
         nx.draw_networkx_nodes(
-            sub,
-            pos,
-            nodelist=nodes_of_type,
-            ax=ax,
-            node_color=colors,
-            node_shape=marker,
-            node_size=sizes,
-            edgecolors="black",
-            linewidths=0.5,
+            sub, pos, nodelist=nodes_of_type, ax=ax, node_color=colors,
+            node_shape=marker, node_size=sizes, edgecolors="black", linewidths=0.5,
         )
 
     # Labels offset above the marker (rather than centered on it) so text
@@ -307,11 +235,7 @@ def draw_ego_panel(
     label_pos = {n: (x, y + label_offset) for n, (x, y) in pos.items()}
     labels = {n: paper_node_label(n, sub.nodes[n]) for n in sub.nodes()}
     nx.draw_networkx_labels(
-        sub,
-        label_pos,
-        labels=labels,
-        ax=ax,
-        font_size=8,
+        sub, label_pos, labels=labels, ax=ax, font_size=8,
         bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.75, "pad": 0.5},
     )
 
@@ -346,202 +270,13 @@ def draw_ego_panel(
     ax.axis("off")
 
 
-def node_legend_handles(types: list[str]) -> list[Line2D]:
-    return [
-        Line2D(
-            [0],
-            [0],
-            marker=NODE_MARKERS[t],
-            color="w",
-            markerfacecolor=NODE_COLORS[t],
-            markeredgecolor="black",
-            markersize=9,
-            label=NODE_TYPE_LABELS[t],
-        )
-        for t in types
-    ]
-
-
-def context_legend_handle() -> Line2D:
-    """A node's type-color swatch (node_legend_handles) doesn't distinguish
-    a highlighted instance of that type from a muted context one — e.g. a
-    figure can show one drug in its real DRG color and another, unrelated
-    drug in gray. This one extra legend row explains the gray encoding
-    itself, appended whenever a figure actually has context nodes."""
-    return Line2D(
-        [0],
-        [0],
-        marker="o",
-        color="w",
-        markerfacecolor=CONTEXT_COLOR,
-        markeredgecolor="black",
-        markersize=9,
-        label="other entity resolved by this evidence item (not highlighted)",
-    )
-
-
-def edge_legend_handle(color: str, style: str, label: str) -> Line2D:
-    return Line2D(
-        [0],
-        [0],
-        color=color,
-        lw=2.5,
-        linestyle="--" if style == "dashed" else "-",
-        label=label,
-    )
-
-
-def save_static_figure(fig, legend_handles: list[Line2D], out_path_base: str) -> None:
-    fig.legend(
-        handles=legend_handles,
-        loc="lower center",
-        ncol=min(len(legend_handles), 4),
-        frameon=True,
-        fontsize=8,
-        bbox_to_anchor=(0.5, -0.02),
-    )
-    fig.tight_layout(rect=[0, 0.08, 1, 1])
-    fig.savefig(f"{out_path_base}.svg", bbox_inches="tight")
-    fig.savefig(f"{out_path_base}.pdf", bbox_inches="tight")
-    plt.close(fig)
-    print(f"[save] wrote {out_path_base}.svg / .pdf")
-
-
-def legend_html(
-    node_types: list[str], edges: list[tuple[str, str, str]], has_context: bool
-) -> str:
-    """pyvis renders no legend of its own — this builds the same
-    node-type/edge-style key the static figure's matplotlib legend shows,
-    as a small floating panel injected into the saved HTML so it's visible
-    on the page itself, not just discoverable by hovering."""
-    rows = []
-    for t in node_types:
-        rows.append(
-            '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">'
-            f'<span style="width:12px;height:12px;border-radius:50%;background:{NODE_COLORS[t]};'
-            'border:1px solid #333;display:inline-block;flex:none;"></span>'
-            f"<span>{NODE_TYPE_LABELS[t]}</span></div>"
-        )
-    if has_context:
-        rows.append(
-            '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">'
-            f'<span style="width:12px;height:12px;border-radius:50%;background:{CONTEXT_COLOR};'
-            'border:1px solid #333;display:inline-block;flex:none;"></span>'
-            "<span>other entity resolved by this evidence item</span></div>"
-        )
-    for color, style, label in edges:
-        border = "dashed" if style == "dashed" else "solid"
-        rows.append(
-            '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;">'
-            f'<span style="width:22px;border-top:3px {border} {color};display:inline-block;flex:none;"></span>'
-            f"<span>{label}</span></div>"
-        )
-    return (
-        '<div style="position:fixed;top:12px;right:12px;background:white;'
-        "border:1px solid #ccc;border-radius:8px;padding:10px 14px;"
-        "font:13px -apple-system,sans-serif;box-shadow:0 1px 6px rgba(0,0,0,.25);"
-        'z-index:1000;max-width:280px;">'
-        '<div style="font-weight:600;margin-bottom:6px;">Legend</div>'
-        + "".join(rows)
-        + "</div>"
-    )
-
-
-def render_interactive_panel(
-    sub: nx.DiGraph,
-    highlighted_edges: list[dict],
-    out_path: Path,
-    synthetic_edges: list[dict] | None = None,
-    center_id: str | None = None,
-    title: str | None = None,
-    context_node_ids: set | None = None,
-    legend_edges: list[tuple[str, str, str]] | None = None,
-) -> None:
-    """Interactive pyvis counterpart to draw_ego_panel's static SVG/PDF —
-    same subgraph, same highlighted/context/muted-context node and edge
-    distinctions, relation labels drawn directly on the highlighted edges
-    (not just on hover), plus an injected legend panel. Mirrors
-    graph_ego_networks.py's render_ego_network(), adapted to this file's
-    highlighted/synthetic edge dicts instead of a plain edge_type tooltip."""
-    context_node_ids = context_node_ids or set()
-    highlighted_by_pair = {(h["u"], h["v"]): h for h in highlighted_edges}
-    highlighted_by_pair.update({(h["v"], h["u"]): h for h in highlighted_edges})
-
-    net = Network(
-        height="750px",
-        width="100%",
-        directed=True,
-        notebook=False,
-        heading=title or "",
-    )
-    for node_id, attrs in sub.nodes(data=True):
-        color = (
-            CONTEXT_COLOR
-            if node_id in context_node_ids
-            else NODE_COLORS.get(attrs.get("node_type"), "#828C97")
-        )
-        size = 32 if node_id == center_id else 18
-        net.add_node(
-            node_id,
-            label=paper_node_label(node_id, attrs),
-            title=f"{attrs.get('node_type')}: {node_id}",
-            color=color,
-            size=size,
-        )
-    for u, v, data in sub.edges(data=True):
-        if u == v:
-            continue  # self-loops add nothing here either — see draw_ego_panel
-        h = highlighted_by_pair.get((u, v))
-        if h:
-            net.add_edge(
-                u,
-                v,
-                color=h.get("color", HIGHLIGHT_COLOR),
-                width=3,
-                dashes=h.get("style") == "dashed",
-                label=h.get("label", ""),
-                title=h.get("label", ""),
-            )
-        else:
-            net.add_edge(u, v, color=CONTEXT_COLOR, title=data.get("edge_type", ""))
-
-    for s in synthetic_edges or []:
-        # Not a real graph edge (e.g. Figure 1 panel B's "no direct MoA
-        # edge" absence connector) — both endpoints are already added as
-        # nodes above, so pyvis can still draw a line between them.
-        net.add_edge(
-            s["u"],
-            s["v"],
-            color=s.get("color", GAP_COLOR),
-            width=1.5,
-            dashes=True,
-            label=s.get("label", ""),
-            title=s.get("label", ""),
-        )
-
-    net.write_html(str(out_path))
-
-    node_types_present = [
-        t
-        for t in NODE_TYPE_ORDER
-        if any(sub.nodes[n].get("node_type") == t for n in sub.nodes())
-    ]
-    legend = legend_html(node_types_present, legend_edges or [], bool(context_node_ids))
-    html = out_path.read_text()
-    out_path.write_text(html.replace("</body>", legend + "</body>"))
-
-    print(f"[save] wrote {out_path}")
-
-
 # %%
 # ---------------------------------------------------------------------------
 # 0. Load the cancer-scoped graph, build the relation lookups every figure
 # below shares.
 # ---------------------------------------------------------------------------
 
-cancer_scoped_graph_path = find_latest_file(
-    "data/processed", "cancer_scoped_graph_*.pkl"
-)
+cancer_scoped_graph_path = find_latest_file("data/processed", "cancer_scoped_graph_*.pkl")
 print(f"[load] {cancer_scoped_graph_path}")
 with open(cancer_scoped_graph_path, "rb") as f:
     CSG = pickle.load(f)
@@ -553,6 +288,7 @@ gen_gen_adj: dict[str, set[str]] = {}
 drg_phe_by_drug: dict[str, list[tuple[str, str]]] = {}
 dis_parent_of: dict[str, list[str]] = {}
 gen_dis_origin: dict[str, list[tuple[str, list]]] = {}
+drg_drg_interaction: dict[frozenset, dict] = {}
 for u, v, d in CSG.edges(data=True):
     et = d.get("edge_type")
     if et == "DRG-GEN" and d.get("relation"):
@@ -570,12 +306,17 @@ for u, v, d in CSG.edges(data=True):
     elif et == "GEN-DIS":
         gen_dis_origin.setdefault(u, []).append((v, d.get("origin")))
         gen_dis_origin.setdefault(v, []).append((u, d.get("origin")))
+    elif et == "DRG-DRG" and d.get("relation") == "SYNERGISTIC_INTERACTION":
+        # undirected=True (canonicalized pair) — keyed by frozenset so
+        # lookup doesn't depend on which drug happened to sort first.
+        drg_drg_interaction[frozenset((u, v))] = d
 print(
     f"[setup] {len(drg_gen_relation)} DRG-GEN relations, "
     f"{len(gen_gen_adj)} genes with GEN-GEN neighbors, "
     f"{len(drg_phe_by_drug)} drugs with DRG-PHE edges, "
     f"{len(dis_parent_of)} diseases with a PARENT, "
-    f"{len(gen_dis_origin)} genes/diseases with a GEN-DIS edge"
+    f"{len(gen_dis_origin)} genes/diseases with a GEN-DIS edge, "
+    f"{len(drg_drg_interaction)} drug pairs with a native SYNERGISTIC_INTERACTION"
 )
 
 # %%
@@ -609,9 +350,7 @@ def build_figure1_moa() -> None:
         if hit_pair:
             break
     if hit_pair is None:
-        raise RuntimeError(
-            f"No direct DRG-GEN relation found for {FIG1_HIT_EVI} in the current snapshot."
-        )
+        raise RuntimeError(f"No direct DRG-GEN relation found for {FIG1_HIT_EVI} in the current snapshot.")
     hit_gene, hit_drug, hit_relation = hit_pair
 
     miss_attrs = CSG.nodes[FIG1_MISS_EVI]
@@ -622,21 +361,14 @@ def build_figure1_moa() -> None:
                 continue  # this pair is a hit, not a miss
             for other_gene in gen_gen_adj.get(miss_gene, ()):
                 if (miss_drug, other_gene) in drg_gen_relation:
-                    bridge = (
-                        miss_gene,
-                        miss_drug,
-                        other_gene,
-                        drg_gen_relation[(miss_drug, other_gene)],
-                    )
+                    bridge = (miss_gene, miss_drug, other_gene, drg_gen_relation[(miss_drug, other_gene)])
                     break
             if bridge:
                 break
         if bridge:
             break
     if bridge is None:
-        raise RuntimeError(
-            f"No GEN-GEN bridge found for {FIG1_MISS_EVI} in the current snapshot."
-        )
+        raise RuntimeError(f"No GEN-GEN bridge found for {FIG1_MISS_EVI} in the current snapshot.")
     miss_gene, miss_drug, bridge_gene, bridge_relation = bridge
 
     hit_highlighted = [{"u": hit_drug, "v": hit_gene, "label": hit_relation}]
@@ -645,12 +377,7 @@ def build_figure1_moa() -> None:
         {"u": miss_drug, "v": bridge_gene, "label": bridge_relation},
     ]
     miss_synthetic = [
-        {
-            "u": miss_gene,
-            "v": miss_drug,
-            "label": "no direct MoA edge",
-            "color": GAP_COLOR,
-        },
+        {"u": miss_gene, "v": miss_drug, "label": "no direct MoA edge", "color": GAP_COLOR},
     ]
     edge_legend = [
         (HIGHLIGHT_COLOR, "solid", "documented DRG-GEN mechanism"),
@@ -662,9 +389,7 @@ def build_figure1_moa() -> None:
     # so the panel isn't a misleadingly narrow view of what CIViC actually
     # curated for that evidence item.
     entity_types = {"gene", "drug", "disease", "variant"}
-    hit_extra = other_resolved_nodes(
-        hit_attrs, exclude={hit_gene, hit_drug}, include=entity_types
-    )
+    hit_extra = other_resolved_nodes(hit_attrs, exclude={hit_gene, hit_drug}, include=entity_types)
     miss_extra = other_resolved_nodes(
         miss_attrs, exclude={miss_gene, miss_drug, bridge_gene}, include=entity_types
     )
@@ -673,25 +398,17 @@ def build_figure1_moa() -> None:
 
     sub_a = CSG.subgraph([FIG1_HIT_EVI, hit_gene, hit_drug, *hit_extra])
     draw_ego_panel(
-        ax_a,
-        sub_a,
-        [[FIG1_HIT_EVI], [hit_gene, hit_drug, *hit_extra]],
-        highlighted_edges=hit_highlighted,
-        center_id=FIG1_HIT_EVI,
+        ax_a, sub_a, [[FIG1_HIT_EVI], [hit_gene, hit_drug, *hit_extra]],
+        highlighted_edges=hit_highlighted, center_id=FIG1_HIT_EVI,
         panel_title=f"A — hit: {node_label(hit_gene, CSG.nodes[hit_gene])} / "
         f"{node_label(hit_drug, CSG.nodes[hit_drug])}",
         context_node_ids=set(hit_extra),
     )
 
-    sub_b = CSG.subgraph(
-        [FIG1_MISS_EVI, miss_gene, miss_drug, bridge_gene, *miss_extra]
-    )
+    sub_b = CSG.subgraph([FIG1_MISS_EVI, miss_gene, miss_drug, bridge_gene, *miss_extra])
     draw_ego_panel(
-        ax_b,
-        sub_b,
-        [[FIG1_MISS_EVI], [miss_gene, miss_drug, *miss_extra], [bridge_gene]],
-        highlighted_edges=miss_highlighted,
-        synthetic_edges=miss_synthetic,
+        ax_b, sub_b, [[FIG1_MISS_EVI], [miss_gene, miss_drug, *miss_extra], [bridge_gene]],
+        highlighted_edges=miss_highlighted, synthetic_edges=miss_synthetic,
         center_id=FIG1_MISS_EVI,
         panel_title=f"B — miss: {node_label(miss_gene, CSG.nodes[miss_gene])} / "
         f"{node_label(miss_drug, CSG.nodes[miss_drug])}",
@@ -705,28 +422,24 @@ def build_figure1_moa() -> None:
     )
     legend = node_legend_handles(types_present)
     if hit_extra or miss_extra:
-        legend.append(context_legend_handle())
+        legend.append(context_legend_handle(CONTEXT_LABEL))
     legend += [edge_legend_handle(*e) for e in edge_legend]
     fig.suptitle("Figure 1 — Mechanism of action: hit vs. miss", fontsize=12)
     save_static_figure(fig, legend, str(OUT_DIR / "fig1_mechanism_of_action"))
 
     render_interactive_panel(
-        sub_a,
-        hit_highlighted,
-        OUT_DIR / "fig1_mechanism_of_action_hit.html",
-        center_id=FIG1_HIT_EVI,
-        title="Figure 1A — hit: mechanism of action",
+        sub_a, hit_highlighted, OUT_DIR / "fig1_mechanism_of_action_hit.html",
+        center_id=FIG1_HIT_EVI, title="Figure 1A — hit: mechanism of action",
         context_node_ids=set(hit_extra),
+        context_label=CONTEXT_LABEL if hit_extra else None,
         legend_edges=edge_legend,
     )
     render_interactive_panel(
-        sub_b,
-        miss_highlighted,
-        OUT_DIR / "fig1_mechanism_of_action_miss.html",
-        synthetic_edges=miss_synthetic,
-        center_id=FIG1_MISS_EVI,
+        sub_b, miss_highlighted, OUT_DIR / "fig1_mechanism_of_action_miss.html",
+        synthetic_edges=miss_synthetic, center_id=FIG1_MISS_EVI,
         title="Figure 1B — miss: mechanism of action",
         context_node_ids=set(miss_extra),
+        context_label=CONTEXT_LABEL if miss_extra else None,
         legend_edges=edge_legend,
     )
 
@@ -745,9 +458,7 @@ FIG2_MAX_CONTRAINDICATIONS = 5
 
 def build_figure2_drug_safety() -> None:
     if FIG2_EVI not in CSG:
-        raise RuntimeError(
-            f"Figure 2's vetted example EVI {FIG2_EVI} is missing from the current snapshot."
-        )
+        raise RuntimeError(f"Figure 2's vetted example EVI {FIG2_EVI} is missing from the current snapshot.")
     # drug_node_ids is a list — search every resolved drug rather than
     # assuming index 0 is the one with contraindications (same fix as
     # Figure 1's gene/drug pairing).
@@ -756,17 +467,13 @@ def build_figure2_drug_safety() -> None:
         # No independent priority/severity signal in the data — capped
         # deterministically by node id, not a clinical-severity ordering.
         candidate_contra = sorted(
-            p
-            for p, r in drg_phe_by_drug.get(candidate_drug, [])
-            if r == "CONTRAINDICATION"
+            p for p, r in drg_phe_by_drug.get(candidate_drug, []) if r == "CONTRAINDICATION"
         )
         if candidate_contra:
             drug, contra = candidate_drug, candidate_contra[:FIG2_MAX_CONTRAINDICATIONS]
             break
     if drug is None:
-        raise RuntimeError(
-            f"{FIG2_EVI} has no drug with a CONTRAINDICATION DRG-PHE edge in the current snapshot."
-        )
+        raise RuntimeError(f"{FIG2_EVI} has no drug with a CONTRAINDICATION DRG-PHE edge in the current snapshot.")
 
     highlighted = [{"u": drug, "v": p, "label": "CONTRAINDICATION"} for p in contra]
     edge_legend = [(HIGHLIGHT_COLOR, "solid", "DRG-PHE: CONTRAINDICATION")]
@@ -781,31 +488,24 @@ def build_figure2_drug_safety() -> None:
     sub = CSG.subgraph([FIG2_EVI, drug, *extra, *contra])
     fig, ax = plt.subplots(figsize=(8, 8))
     draw_ego_panel(
-        ax,
-        sub,
-        [[FIG2_EVI], [drug, *extra], contra],
-        highlighted_edges=highlighted,
-        center_id=FIG2_EVI,
+        ax, sub, [[FIG2_EVI], [drug, *extra], contra],
+        highlighted_edges=highlighted, center_id=FIG2_EVI,
         panel_title=f"{node_label(drug, CSG.nodes[drug])} — documented contraindications",
         context_node_ids=set(extra),
     )
-    types_present = sorted(
-        {sub.nodes[n]["node_type"] for n in sub.nodes()}, key=NODE_TYPE_ORDER.index
-    )
+    types_present = sorted({sub.nodes[n]["node_type"] for n in sub.nodes()}, key=NODE_TYPE_ORDER.index)
     legend = node_legend_handles(types_present)
     if extra:
-        legend.append(context_legend_handle())
+        legend.append(context_legend_handle(CONTEXT_LABEL))
     legend += [edge_legend_handle(*e) for e in edge_legend]
     fig.suptitle("Figure 2 — Drug safety/usage context", fontsize=12)
     save_static_figure(fig, legend, str(OUT_DIR / "fig2_drug_safety_context"))
 
     render_interactive_panel(
-        sub,
-        highlighted,
-        OUT_DIR / "fig2_drug_safety_context.html",
-        center_id=FIG2_EVI,
-        title="Figure 2 — Drug safety/usage context",
+        sub, highlighted, OUT_DIR / "fig2_drug_safety_context.html",
+        center_id=FIG2_EVI, title="Figure 2 — Drug safety/usage context",
         context_node_ids=set(extra),
+        context_label=CONTEXT_LABEL if extra else None,
         legend_edges=edge_legend,
     )
 
@@ -822,56 +522,36 @@ FIG3_EVI = "CIVICEVI_7864"  # childhood ALL -> childhood leukemia -> leukemia
 
 def build_figure3_disease_hierarchy() -> None:
     if FIG3_EVI not in CSG:
-        raise RuntimeError(
-            f"Figure 3's vetted example EVI {FIG3_EVI} is missing from the current snapshot."
-        )
+        raise RuntimeError(f"Figure 3's vetted example EVI {FIG3_EVI} is missing from the current snapshot.")
     dis = CSG.nodes[FIG3_EVI]["disease_node_id"]
     chain = [dis]
     node = dis
-    while node in dis_parent_of and dis_parent_of[node]:  # noqa: RUF019
+    while node in dis_parent_of and dis_parent_of[node]:
         node = dis_parent_of[node][0]
         chain.append(node)
     if len(chain) < 2:
-        raise RuntimeError(
-            f"{FIG3_EVI}'s disease has no DIS-DIS PARENT edge in the current snapshot."
-        )
+        raise RuntimeError(f"{FIG3_EVI}'s disease has no DIS-DIS PARENT edge in the current snapshot.")
 
     sub = CSG.subgraph([FIG3_EVI, *chain])
     nlist = [[FIG3_EVI]] + [[n] for n in chain]
     highlighted = [
-        {"u": chain[i + 1], "v": chain[i], "label": "PARENT"}
-        for i in range(len(chain) - 1)
+        {"u": chain[i + 1], "v": chain[i], "label": "PARENT"} for i in range(len(chain) - 1)
     ]
     fig, ax = plt.subplots(figsize=(16, 9))
     draw_ego_panel(
-        ax,
-        sub,
-        nlist,
-        highlighted_edges=highlighted,
-        center_id=FIG3_EVI,
+        ax, sub, nlist, highlighted_edges=highlighted, center_id=FIG3_EVI,
         force_center_view=False,
-        panel_title=" → ".join(
-            paper_node_label(n, CSG.nodes[n]) for n in reversed(chain)
-        ),
+        panel_title=" → ".join(paper_node_label(n, CSG.nodes[n]) for n in reversed(chain)),
     )
-    edge_legend = [
-        (HIGHLIGHT_COLOR, "solid", "DIS-DIS: PARENT (from=parent, to=child)")
-    ]
-    types_present = sorted(
-        {sub.nodes[n]["node_type"] for n in sub.nodes()}, key=NODE_TYPE_ORDER.index
-    )
-    legend = node_legend_handles(types_present) + [
-        edge_legend_handle(*e) for e in edge_legend
-    ]
+    edge_legend = [(HIGHLIGHT_COLOR, "solid", "DIS-DIS: PARENT (from=parent, to=child)")]
+    types_present = sorted({sub.nodes[n]["node_type"] for n in sub.nodes()}, key=NODE_TYPE_ORDER.index)
+    legend = node_legend_handles(types_present) + [edge_legend_handle(*e) for e in edge_legend]
     fig.suptitle("Figure 3 — Disease hierarchy", fontsize=12)
     save_static_figure(fig, legend, str(OUT_DIR / "fig3_disease_hierarchy"))
 
     render_interactive_panel(
-        sub,
-        highlighted,
-        OUT_DIR / "fig3_disease_hierarchy.html",
-        center_id=FIG3_EVI,
-        title="Figure 3 — Disease hierarchy",
+        sub, highlighted, OUT_DIR / "fig3_disease_hierarchy.html",
+        center_id=FIG3_EVI, title="Figure 3 — Disease hierarchy",
         legend_edges=edge_legend,
     )
 
@@ -889,9 +569,7 @@ def build_figure4_gene_disease_gap() -> None:
     evi_candidates = sorted(
         n
         for n, a in CSG.nodes(data=True)
-        if a.get("node_type") == "EVI"
-        and a.get("gene_node_ids")
-        and a.get("disease_node_id")
+        if a.get("node_type") == "EVI" and a.get("gene_node_ids") and a.get("disease_node_id")
     )
     candidate = None
     for eid in evi_candidates:
@@ -914,13 +592,7 @@ def build_figure4_gene_disease_gap() -> None:
 
     highlighted = [
         {"u": gene, "v": civic_dis, "label": "civic"},
-        {
-            "u": gene,
-            "v": gap_dis,
-            "label": "optimuskg only",
-            "color": GAP_COLOR,
-            "style": "dashed",
-        },
+        {"u": gene, "v": gap_dis, "label": "optimuskg only", "color": GAP_COLOR, "style": "dashed"},
     ]
     edge_legend = [
         (HIGHLIGHT_COLOR, "solid", 'origin includes "civic" (this EVI\'s own pair)'),
@@ -931,46 +603,117 @@ def build_figure4_gene_disease_gap() -> None:
     # story, but shown muted so the figure doesn't look like gene+disease
     # is all this evidence item resolves to.
     extra = other_resolved_nodes(
-        CSG.nodes[evi],
-        exclude={gene, civic_dis, gap_dis},
-        include={"variant", "drug"},
+        CSG.nodes[evi], exclude={gene, civic_dis, gap_dis}, include={"variant", "drug"}
     )
 
     sub = CSG.subgraph([evi, gene, *extra, civic_dis, gap_dis])
     fig, ax = plt.subplots(figsize=(11, 11))
     draw_ego_panel(
-        ax,
-        sub,
-        [[evi], [gene, *extra], [civic_dis, gap_dis]],
-        highlighted_edges=highlighted,
-        center_id=evi,
+        ax, sub, [[evi], [gene, *extra], [civic_dis, gap_dis]],
+        highlighted_edges=highlighted, center_id=evi,
         panel_title=f"{node_label(gene, CSG.nodes[gene])}: curated vs. structural disease association",
         context_node_ids=set(extra),
     )
-    types_present = sorted(
-        {sub.nodes[n]["node_type"] for n in sub.nodes()}, key=NODE_TYPE_ORDER.index
-    )
+    types_present = sorted({sub.nodes[n]["node_type"] for n in sub.nodes()}, key=NODE_TYPE_ORDER.index)
     legend = node_legend_handles(types_present)
     if extra:
-        legend.append(context_legend_handle())
+        legend.append(context_legend_handle(CONTEXT_LABEL))
     legend += [edge_legend_handle(*e) for e in edge_legend]
     fig.suptitle("Figure 4 — Gene–disease structural gap", fontsize=12)
     save_static_figure(fig, legend, str(OUT_DIR / "fig4_gene_disease_gap"))
 
     render_interactive_panel(
-        sub,
-        highlighted,
-        OUT_DIR / "fig4_gene_disease_gap.html",
-        center_id=evi,
-        title="Figure 4 — Gene–disease structural gap",
+        sub, highlighted, OUT_DIR / "fig4_gene_disease_gap.html",
+        center_id=evi, title="Figure 4 — Gene–disease structural gap",
         context_node_ids=set(extra),
+        context_label=CONTEXT_LABEL if extra else None,
         legend_edges=edge_legend,
     )
 
 
 # %%
 # ---------------------------------------------------------------------------
-# Build all 4. Each raises loudly if its vetted example (or, for Figure 4,
+# Figure 5: drug-drug interaction safety flag (DRG-DRG,
+# SYNERGISTIC_INTERACTION). Despite its name, this native relation is
+# sourced entirely from DrugBank's drug-drug INTERACTION data, not a
+# documented therapeutic-synergy claim — checked directly: 0 of 157,329
+# descriptions carry positive/beneficial-synergy language, and every one
+# is a pharmacokinetic/toxicity caution ("risk of adverse effects can be
+# increased," "serum concentration/metabolism altered," etc.). So this
+# figure isn't validating that a CIViC-cited combination is effective —
+# it's flagging that OptimusKG's independent pharmacology data documents a
+# real interaction *risk* between two drugs this evidence item uses
+# together, the same spirit as Figure 2's contraindication story but at
+# the drug-pair level. (118 COMBINATION EVIs have a corroborating native
+# interaction edge, per find_figure_candidates.py's fig5 search; a further
+# 186 EVIs have one too but under CIViC's SUBSTITUTES claim instead —
+# interchangeable alternatives, not co-administration — a different,
+# not-yet-built story about flagging a risk between drugs that aren't
+# meant to be combined at all.)
+# ---------------------------------------------------------------------------
+
+FIG5_EVI = "CIVICEVI_6938"  # BRAF V600E melanoma, dabrafenib + trametinib (COMBINATION)
+
+
+def build_figure5_drug_interaction_safety() -> None:
+    if FIG5_EVI not in CSG:
+        raise RuntimeError(f"Figure 5's vetted example EVI {FIG5_EVI} is missing from the current snapshot.")
+    attrs = CSG.nodes[FIG5_EVI]
+    drugs = [d for d in (attrs.get("drug_node_ids") or []) if d]
+    interaction = None
+    for i in range(len(drugs)):
+        for j in range(i + 1, len(drugs)):
+            interaction = drg_drg_interaction.get(frozenset((drugs[i], drugs[j])))
+            if interaction:
+                drug1, drug2 = drugs[i], drugs[j]
+                break
+        if interaction:
+            break
+    if interaction is None:
+        raise RuntimeError(
+            f"No native SYNERGISTIC_INTERACTION edge found between {FIG5_EVI}'s drugs in the current snapshot."
+        )
+
+    highlighted = [{"u": drug1, "v": drug2, "label": "SYNERGISTIC_INTERACTION"}]
+    edge_legend = [
+        (HIGHLIGHT_COLOR, "solid", "DRG-DRG: SYNERGISTIC_INTERACTION — DrugBank interaction caution, not an efficacy claim")
+    ]
+
+    # The EVI's gene, disease, and variant(s) — not part of the drug-pair
+    # story, but shown muted so the figure doesn't look like the two drugs
+    # are all this evidence item resolves to.
+    extra = other_resolved_nodes(
+        attrs, exclude={drug1, drug2}, include={"gene", "disease", "variant"}
+    )
+
+    sub = CSG.subgraph([FIG5_EVI, drug1, drug2, *extra])
+    fig, ax = plt.subplots(figsize=(11, 11))
+    draw_ego_panel(
+        ax, sub, [[FIG5_EVI], [drug1, drug2, *extra]],
+        highlighted_edges=highlighted, center_id=FIG5_EVI,
+        panel_title=interaction["interaction_description"],
+        context_node_ids=set(extra),
+    )
+    types_present = sorted({sub.nodes[n]["node_type"] for n in sub.nodes()}, key=NODE_TYPE_ORDER.index)
+    legend = node_legend_handles(types_present)
+    if extra:
+        legend.append(context_legend_handle(CONTEXT_LABEL))
+    legend += [edge_legend_handle(*e) for e in edge_legend]
+    fig.suptitle("Figure 5 — Drug-drug interaction safety flag", fontsize=12)
+    save_static_figure(fig, legend, str(OUT_DIR / "fig5_drug_interaction"))
+
+    render_interactive_panel(
+        sub, highlighted, OUT_DIR / "fig5_drug_interaction.html",
+        center_id=FIG5_EVI, title="Figure 5 — Drug-drug interaction safety flag",
+        context_node_ids=set(extra),
+        context_label=CONTEXT_LABEL if extra else None,
+        legend_edges=edge_legend,
+    )
+
+
+# %%
+# ---------------------------------------------------------------------------
+# Build all 5. Each raises loudly if its vetted example (or, for Figure 4,
 # the deterministic search) no longer holds against the current
 # cancer_scoped_graph snapshot, rather than silently substituting an
 # unreviewed example.
@@ -981,6 +724,7 @@ for build_fn in (
     build_figure2_drug_safety,
     build_figure3_disease_hierarchy,
     build_figure4_gene_disease_gap,
+    build_figure5_drug_interaction_safety,
 ):
     build_fn()
 

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Step 1 of building the paper's 4 figures — run this before
+Step 1 of building the paper's 5 figures — run this before
 graph_ego_figures.py. Surveys candidate evidence items for each figure's
 story and prints (and saves) the top N, so a specific example can be
 picked and hardcoded into graph_ego_figures.py's FIG1_HIT_EVI/
-FIG1_MISS_EVI/FIG2_EVI/FIG3_EVI (Figure 4 needs no manual pick — its own
-search is deterministic and reproduced here too, for visibility into
-alternatives). Not imported from graph_ego_figures.py (that script builds
-all 4 figures on import) — the small shared bits are duplicated here
-instead. Each search dedupes to one row per EVI.
+FIG1_MISS_EVI/FIG2_EVI/FIG3_EVI/FIG5_EVI (Figure 4 needs no manual pick —
+its own search is deterministic and reproduced here too, for visibility
+into alternatives). Not imported from graph_ego_figures.py (that script
+builds all 5 figures on import) — the small shared bits are duplicated
+here instead. Each search dedupes to one row per EVI.
 
 Inputs:
     - data/processed/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
@@ -74,6 +74,7 @@ drg_phe_by_drug: dict[str, list[tuple[str, str]]] = {}
 dis_parent_of: dict[str, list[str]] = {}
 dis_parent_children: dict[str, list[str]] = {}
 gen_dis_origin: dict[str, list[tuple[str, list]]] = {}
+drg_drg_interaction: dict[frozenset, dict] = {}
 for u, v, d in CSG.edges(data=True):
     et = d.get("edge_type")
     if et == "DRG-GEN" and d.get("relation"):
@@ -89,12 +90,15 @@ for u, v, d in CSG.edges(data=True):
     elif et == "GEN-DIS":
         gen_dis_origin.setdefault(u, []).append((v, d.get("origin")))
         gen_dis_origin.setdefault(v, []).append((u, d.get("origin")))
+    elif et == "DRG-DRG" and d.get("relation") == "SYNERGISTIC_INTERACTION":
+        drg_drg_interaction[frozenset((u, v))] = d
 print(
     f"[setup] {len(evi_nodes)} EVI nodes, {len(drg_gen_relation)} DRG-GEN relations, "
     f"{len(gen_gen_adj)} genes with GEN-GEN neighbors, "
     f"{len(drg_phe_by_drug)} drugs with DRG-PHE edges, "
     f"{len(dis_parent_of)} diseases with a PARENT, "
-    f"{len(gen_dis_origin)} genes/diseases with a GEN-DIS edge"
+    f"{len(gen_dis_origin)} genes/diseases with a GEN-DIS edge, "
+    f"{len(drg_drg_interaction)} drug pairs with a native SYNERGISTIC_INTERACTION"
 )
 
 report = {
@@ -307,6 +311,60 @@ report["fig4"] = {
         }
         for eid, gene, own_dis, gap_dis in fig4_candidates[:TOP_N]
     ],
+}
+
+# %%
+# ---------------------------------------------------------------------------
+# Figure 5: EVI with >=2 resolved drugs where a direct native
+# SYNERGISTIC_INTERACTION edge exists between two of them. Despite the
+# name, this relation is sourced entirely from DrugBank's drug-drug
+# INTERACTION data (checked directly: 0/157,329 descriptions carry
+# positive-synergy language; all are pharmacokinetic/toxicity cautions) —
+# so this is a safety flag, not a validation that a combination works.
+# Split by the EVI's own therapy_interaction_type: COMBINATION (drugs
+# actually co-administered — flags a real interaction risk within CIViC's
+# own combination claim) vs. SUBSTITUTES (interchangeable alternatives — a
+# different, not-yet-built story about flagging a risk between drugs
+# that aren't meant to be combined at all). One row per EVI, first
+# qualifying drug pair.
+# ---------------------------------------------------------------------------
+
+fig5_combination = []
+fig5_substitutes = []
+for eid, a in evi_nodes.items():
+    drugs = [d for d in (a.get("drug_node_ids") or []) if d]
+    if len(drugs) < 2:
+        continue
+    therapy_type = a.get("therapy_interaction_type")
+    pair = None
+    for i in range(len(drugs)):
+        for j in range(i + 1, len(drugs)):
+            if frozenset((drugs[i], drugs[j])) in drg_drg_interaction:
+                pair = (drugs[i], drugs[j])
+                break
+        if pair:
+            break
+    if not pair:
+        continue
+    if therapy_type == "COMBINATION":
+        fig5_combination.append((eid, *pair))
+    elif therapy_type == "SUBSTITUTES":
+        fig5_substitutes.append((eid, *pair))
+
+print(
+    f"\n[Fig5] {len(fig5_combination)} COMBINATION EVIs with a corroborating "
+    f"native interaction, {len(fig5_substitutes)} SUBSTITUTES EVIs likewise"
+)
+for eid, d1, d2 in fig5_combination[:TOP_N]:
+    print(f"  {eid}: {label(d1)} + {label(d2)}")
+
+report["fig5_combination"] = {
+    "total": len(fig5_combination),
+    "top": [{"evi": eid, "drug_1": label(d1), "drug_2": label(d2)} for eid, d1, d2 in fig5_combination[:TOP_N]],
+}
+report["fig5_substitutes"] = {
+    "total": len(fig5_substitutes),
+    "top": [{"evi": eid, "drug_1": label(d1), "drug_2": label(d2)} for eid, d1, d2 in fig5_substitutes[:TOP_N]],
 }
 
 report_path = OUT_DIR / f"find_figure_candidates_{datetime.now(timezone.utc):%Y-%m-%d}.json"
