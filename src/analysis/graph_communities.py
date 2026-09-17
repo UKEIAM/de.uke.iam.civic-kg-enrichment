@@ -120,13 +120,19 @@ report = {
 node_ids = g_ig.vs["_nx_name"]
 CURATED_ELIGIBLE_TYPES = {"GEN", "DIS", "DRG", "VAR"}
 
+# Every node id per community — persisted below for the flagged (all-
+# curated/all-gap) communities so a later script can pull the real
+# nodes/edges for a specific community without rerunning Leiden (which
+# itself needs the ~170s igraph conversion above every time).
+community_members: dict[int, list[str]] = {}
 community_curated = Counter()
 community_eligible = Counter()
 for vertex_idx, node_id in enumerate(node_ids):
+    comm = partition.membership[vertex_idx]
+    community_members.setdefault(comm, []).append(node_id)
     attrs = G.nodes[node_id]
     if attrs.get("node_type") not in CURATED_ELIGIBLE_TYPES:
         continue
-    comm = partition.membership[vertex_idx]
     community_eligible[comm] += 1
     if attrs.get("in_civic_evidence_item"):
         community_curated[comm] += 1
@@ -172,11 +178,17 @@ report["structural_gap"] = {
     "n_all_gap": len(all_gap),
     "mean_curated_fraction": sum(mixed_fractions) / len(mixed_fractions),
     "all_curated_communities": [
-        {"community_id": comm, "size": size, "eligible": eligible}
+        {
+            "community_id": comm, "size": size, "eligible": eligible,
+            "members": community_members[comm],
+        }
         for comm, size, eligible in all_curated
     ],
     "all_gap_communities": [
-        {"community_id": comm, "size": size, "eligible": eligible}
+        {
+            "community_id": comm, "size": size, "eligible": eligible,
+            "members": community_members[comm],
+        }
         for comm, size, eligible in all_gap
     ],
     "top_10_largest_all_gap_communities": [
