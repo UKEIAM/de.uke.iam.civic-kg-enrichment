@@ -437,28 +437,49 @@ def resolve_civic_drug(
     return {"drug_node_id": None, "drug_resolved_via": "unresolved"}
 
 
+def _split_drug_ids_aligned(raw, n: int) -> list[str | None]:
+    """Split a comma-separated therapy_drugbank_id/therapy_chembl_id
+    value into exactly n position-aligned slots, matching
+    therapy_name's own drug count (see resolve_civic_drug_row — name is
+    the one field with no leading/trailing comma artifacts, confirmed
+    empirically, so it's the reliable source of the true slot count).
+
+    Previously this filtered out empty segments (`if x.strip()`), which
+    silently destroyed position alignment whenever a non-last drug in a
+    multi-drug row had no id for this field — e.g. evidence item 1496's
+    "Carboplatin,Paclitaxel,Sorafenib" has no DrugBank id for Carboplatin
+    and no ChEMBL id for Carboplatin either, so therapy_chembl_id is
+    ",CHEMBL428647,CHEMBL1336"; filtering the leading empty slot shifted
+    everything left by one, so Paclitaxel's resolution attempt used
+    Sorafenib's ChEMBL id instead of its own, collapsing both onto the
+    same node and leaving Paclitaxel with no node at all. Empty slots are
+    now kept positionally (as "", already falsy to resolve_civic_drug's
+    `if chembl_id:` checks) and the list is only trimmed/padded against
+    n — trimming specifically discards the trailing-comma artifacts that
+    DO exist in this field (confirmed empirically: 177/217 rows have a
+    trailing comma in therapy_drugbank_id/therapy_chembl_id respectively,
+    none in therapy_name) without re-introducing the same misalignment
+    for a genuine leading/internal empty slot.
+    """
+    if pd.isna(raw):
+        return [None] * n
+    parts = [p.strip() for p in str(raw).split(",")]
+    parts = parts[:n]
+    parts += [None] * (n - len(parts))
+    return parts
+
+
 def resolve_civic_drug_row(row: pd.Series) -> dict:
     drugbank_raw = row.get("therapy_drugbank_id")
     chembl_raw = row.get("therapy_chembl_id")
     name_raw = row.get("therapy_name")
 
-    drugbank_list = (
-        [d.strip() for d in str(drugbank_raw).split(",") if d.strip()]
-        if pd.notna(drugbank_raw)
-        else []
-    )
-    chembl_list = (
-        [c.strip() for c in str(chembl_raw).split(",") if c.strip()]
-        if pd.notna(chembl_raw)
-        else []
-    )
     name_list = (
         [n.strip() for n in str(name_raw).split(",") if n.strip()]
         if pd.notna(name_raw)
         else []
     )
-
-    n = max(len(drugbank_list), len(chembl_list), len(name_list))
+    n = len(name_list)
     if n == 0:
         return {
             "drug_node_ids": [],
@@ -469,10 +490,8 @@ def resolve_civic_drug_row(row: pd.Series) -> dict:
             "drug_any_resolved": False,
         }
 
-    # Confirmed that CIViC's therapy_drugbank_id and therapy_chembl_id fields are position-aligned
-    drugbank_list += [None] * (n - len(drugbank_list))
-    chembl_list += [None] * (n - len(chembl_list))
-    name_list += [None] * (n - len(name_list))
+    drugbank_list = _split_drug_ids_aligned(drugbank_raw, n)
+    chembl_list = _split_drug_ids_aligned(chembl_raw, n)
 
     node_ids, resolved_via_list = [], []
     seen_triples = set()
