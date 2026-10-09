@@ -30,8 +30,8 @@ Inputs:
       variant_gene,variant_evidence,variant_disease,gene_disease,variant_drug,
       gene_drug,drug_drug,drug_disease}_*.parquet
 Outputs:
-    - data/processed/evidence_graph_<date>.pkl (the assembled networkx.DiGraph)
-    - data/processed/evidence_graph_<date>_metadata.json (build provenance:
+    - data/graphs/evidence_graph_<date>.pkl (the assembled networkx.DiGraph)
+    - data/graphs/evidence_graph_<date>_metadata.json (build provenance:
       OptimusKG snapshot, node/edge counts by type, timestamp)
 
 Usage:
@@ -53,6 +53,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
 from load_files import find_latest_file
 
 PROCESSED_DIR = Path("data/processed")
+GRAPHS_DIR = Path("data/graphs")  # final graph pickles, kept separate from
+GRAPHS_DIR.mkdir(parents=True, exist_ok=True)  # the intermediate node/edge tables above
 date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 NODE_TYPES = ["gene", "disease", "drug", "variant", "evidence_item"]
@@ -284,7 +286,7 @@ print(
 # 5. Persist: pickle (preserves native list/dict attrs) + metadata
 # ---------------------------------------------------------------------------
 
-graph_path = PROCESSED_DIR / f"evidence_graph_{date_str}.pkl"
+graph_path = GRAPHS_DIR / f"evidence_graph_{date_str}.pkl"
 with open(graph_path, "wb") as f:
     pickle.dump(G, f)
 print(f"\n[save] wrote {graph_path}")
@@ -300,7 +302,7 @@ metadata = {
     "nodes_by_type": {NODE_TYPE_LABELS[k]: len(v) for k, v in node_records.items()},
     "edges_by_type": {EDGE_TYPE_LABELS[k]: len(v) for k, v in edge_records.items()},
 }
-metadata_path = PROCESSED_DIR / f"evidence_graph_{date_str}_metadata.json"
+metadata_path = GRAPHS_DIR / f"evidence_graph_{date_str}_metadata.json"
 with open(metadata_path, "w") as f:
     json.dump(metadata, f, indent=2)
 print(f"[save] wrote {metadata_path}")

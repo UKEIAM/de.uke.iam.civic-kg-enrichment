@@ -11,7 +11,7 @@ igraph/leidenalg, not networkx's own louvain_communities: compiled C
 implementation, needed at this graph's scale (~192k nodes / ~5.1M edges)
 
 Inputs:
-    - data/processed/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
+    - data/graphs/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
 Outputs:
     - printed report
     - data/processed/graph_communities/graph_communities_<date>.json (same
@@ -49,7 +49,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 # 0. Load, build the undirected view, convert to igraph.
 # ---------------------------------------------------------------------------
 
-graph_path = find_latest_file("data/processed", "cancer_scoped_graph_*.pkl")
+graph_path = find_latest_file("data/graphs", "cancer_scoped_graph_*.pkl")
 print(f"[load] {graph_path}")
 t0 = time.time()
 with open(graph_path, "rb") as f:

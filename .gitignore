@@ -5,6 +5,7 @@
 # Ignore specified folders
 data/raw/*
 data/processed/*
+data/graphs/*
 notebooks/*
 
 

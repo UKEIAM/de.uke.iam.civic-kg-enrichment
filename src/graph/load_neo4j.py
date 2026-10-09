@@ -19,7 +19,7 @@ if NEO4J_URI/NEO4J_USERNAME/NEO4J_PASSWORD are set (via .env — see
 .env.example), and is otherwise skipped.
 
 Inputs:
-    - data/processed/evidence_backed_expanded_graph_*.pkl (from build_expanded_evidence_graph.py)
+    - data/graphs/evidence_backed_expanded_graph_*.pkl (from build_expanded_evidence_graph.py)
     - .env (NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD)
 Outputs:
     - writes directly to the configured Neo4j database (or, with no
@@ -324,7 +324,7 @@ def get_existing_counts(driver) -> tuple[dict[str, int], dict[str, int]]:
 # Load the graph, self-test, then either write to Neo4j or print a dry run.
 # ---------------------------------------------------------------------------
 
-graph_path = find_latest_file("data/processed", "evidence_backed_expanded_graph_*.pkl")
+graph_path = find_latest_file("data/graphs", "evidence_backed_expanded_graph_*.pkl")
 print(f"[load] {graph_path}")
 with open(graph_path, "rb") as f:
     G = pickle.load(f)

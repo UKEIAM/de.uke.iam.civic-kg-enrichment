@@ -23,7 +23,7 @@ Reuses graph_communities.py's persisted community membership
 graph_communities.py first if those files predate a graph rebuild.
 
 Inputs:
-    - data/processed/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
+    - data/graphs/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
     - data/processed/graph_communities/graph_communities_*.json (from graph_communities.py)
 Outputs:
     - data/processed/community_examples/community_{curated,gap_small,gap_hub}_example.{svg,pdf,html}
@@ -76,7 +76,7 @@ HUB_NEIGHBOR_N = 20
 # 0. Load the cancer-scoped graph and the persisted community membership.
 # ---------------------------------------------------------------------------
 
-graph_path = find_latest_file("data/processed", "cancer_scoped_graph_*.pkl")
+graph_path = find_latest_file("data/graphs", "cancer_scoped_graph_*.pkl")
 print(f"[load] {graph_path}")
 with open(graph_path, "rb") as f:
     CSG = pickle.load(f)

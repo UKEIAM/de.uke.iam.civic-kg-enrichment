@@ -28,7 +28,7 @@ full pool and choose a different example. Figure 4 needs no manual pick:
 its own search is deterministic and runs live below.
 
 Inputs:
-    - data/processed/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
+    - data/graphs/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)
 Outputs:
     - data/processed/ego_networks/fig{1,2,3,4,5}_*.{svg,pdf} (the print figures)
     - data/processed/ego_networks/fig{1,2,3,4,5}_*.html (interactive pyvis
@@ -327,7 +327,7 @@ def draw_ego_panel(
 # ---------------------------------------------------------------------------
 
 cancer_scoped_graph_path = find_latest_file(
-    "data/processed", "cancer_scoped_graph_*.pkl"
+    "data/graphs", "cancer_scoped_graph_*.pkl"
 )
 print(f"[load] {cancer_scoped_graph_path}")
 with open(cancer_scoped_graph_path, "rb") as f:

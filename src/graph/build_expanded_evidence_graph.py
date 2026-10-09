@@ -40,11 +40,11 @@ Pulls in everything touching an evidence-backed gene/disease/drug node, except:
       just marked undirected=True since the relation itself is symmetric.
 
 Inputs:
-    - data/processed/evidence_graph_*.pkl (from build_evidence_graph.py)
+    - data/graphs/evidence_graph_*.pkl (from build_evidence_graph.py)
     - data/raw/optimuskg/optimuskg_lcc_graph_*.pkl (the raw OptimusKG pickle)
 Outputs:
-    - data/processed/evidence_backed_expanded_graph_<date>.pkl
-    - data/processed/evidence_backed_expanded_graph_<date>_metadata.json
+    - data/graphs/evidence_backed_expanded_graph_<date>.pkl
+    - data/graphs/evidence_backed_expanded_graph_<date>_metadata.json
 
 Usage:
     python src/graph/build_expanded_evidence_graph.py
@@ -65,7 +65,8 @@ import networkx as nx
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
 from load_files import find_latest_file
 
-PROCESSED_DIR = Path("data/processed")
+GRAPHS_DIR = Path("data/graphs")  # final graph pickles only
+GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
 date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 # Density-excluded (measured, not assumed — see module docstring).
@@ -83,7 +84,7 @@ RAW_LABELS_SKIPPED = {"DIS-GEN", "DRG-DRG", "DRG-GEN", "DRG-DIS"}
 # native OptimusKG exploration.
 # ---------------------------------------------------------------------------
 
-evidence_graph_path = find_latest_file(PROCESSED_DIR, "evidence_graph_*.pkl")
+evidence_graph_path = find_latest_file(GRAPHS_DIR, "evidence_graph_*.pkl")
 print(f"[load] {evidence_graph_path}")
 t0 = time.time()
 with open(evidence_graph_path, "rb") as f:
@@ -281,7 +282,7 @@ full_edge_type_breakdown = Counter(
 )
 print(f"[stats] edges by type: {dict(full_edge_type_breakdown)}")
 
-graph_path = PROCESSED_DIR / f"evidence_backed_expanded_graph_{date_str}.pkl"
+graph_path = GRAPHS_DIR / f"evidence_backed_expanded_graph_{date_str}.pkl"
 with open(graph_path, "wb") as f:
     pickle.dump(G, f)
 print(f"\n[save] wrote {graph_path}")
@@ -307,7 +308,7 @@ metadata = {
     "raw_labels_skipped_in_stage_2": sorted(RAW_LABELS_SKIPPED),
 }
 metadata_path = (
-    PROCESSED_DIR / f"evidence_backed_expanded_graph_{date_str}_metadata.json"
+    GRAPHS_DIR / f"evidence_backed_expanded_graph_{date_str}_metadata.json"
 )
 with open(metadata_path, "w") as f:
     json.dump(metadata, f, indent=2)

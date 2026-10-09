@@ -5,7 +5,7 @@ in [4,10], diverse neighbor-type signature) and renders each as an
 interactive pyvis figure. Runs against evidence_backed_expanded_graph_*.pkl.
 
 Inputs:
-    - data/processed/evidence_backed_expanded_graph_*.pkl (from build_expanded_evidence_graph.py)
+    - data/graphs/evidence_backed_expanded_graph_*.pkl (from build_expanded_evidence_graph.py)
 Outputs:
     - data/processed/ego_networks/<evidence_item_id>.html (one pyvis figure
       per representative evidence item)
@@ -81,7 +81,7 @@ def render_ego_network(G: nx.DiGraph, center_id: str, out_path: Path) -> None:
 # 0. Load, pick representative evidence items.
 # ---------------------------------------------------------------------------
 
-graph_path = find_latest_file("data/processed", "evidence_backed_expanded_graph_*.pkl")
+graph_path = find_latest_file("data/graphs", "evidence_backed_expanded_graph_*.pkl")
 print(f"[load] {graph_path}")
 with open(graph_path, "rb") as f:
     G = pickle.load(f)
