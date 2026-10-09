@@ -30,7 +30,7 @@ Outputs:
     - data/processed/community_examples/community_examples_<date>.json
 
 Usage:
-    python src/analysis/graph_community_figures.py
+    python src/analysis/exploratory/graph_community_figures.py
 """
 
 # %%
@@ -48,7 +48,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import networkx as nx
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "utils"))
 from graph_viz import (
     NODE_COLORS,
     NODE_MARKERS,

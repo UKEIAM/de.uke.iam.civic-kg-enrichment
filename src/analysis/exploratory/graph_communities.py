@@ -18,7 +18,7 @@ Outputs:
       figures the report prints, structured for downstream reuse)
 
 Usage:
-    python src/analysis/graph_communities.py
+    python src/analysis/exploratory/graph_communities.py
 """
 
 # %%
@@ -34,7 +34,7 @@ from pathlib import Path
 import igraph as ig
 import leidenalg
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "utils"))
 from load_files import find_latest_file
 
 RANDOM_SEED = 42

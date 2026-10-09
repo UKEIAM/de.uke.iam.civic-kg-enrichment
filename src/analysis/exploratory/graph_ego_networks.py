@@ -11,7 +11,7 @@ Outputs:
       per representative evidence item)
 
 Usage:
-    python src/analysis/graph_ego_networks.py
+    python src/analysis/exploratory/graph_ego_networks.py
 """
 
 # %%
@@ -23,7 +23,7 @@ from pathlib import Path
 import networkx as nx
 from pyvis.network import Network
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "utils"))
 from graph_viz import NODE_COLORS, node_label
 from load_files import find_latest_file
 

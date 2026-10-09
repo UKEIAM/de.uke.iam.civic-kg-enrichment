@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """
+EXPLORATORY / SUPERSEDED: the paper's published figures were ultimately
+picked and exported from src/app/candidate_browser.py (Streamlit), not
+from this script. Kept for reference only.
+
 5 purpose-built figures:
 1. mechanism of action (hit/miss pair)
 2. drug safety/usage
@@ -31,7 +35,7 @@ Outputs:
       counterparts of the same subgraphs, for exploration)
 
 Usage:
-    python src/analysis/graph_ego_figures.py
+    python src/analysis/exploratory/graph_ego_figures.py
 """
 
 # %%
@@ -46,7 +50,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import networkx as nx
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "utils"))
 from graph_viz import (
     CONTEXT_COLOR,
     GAP_COLOR,

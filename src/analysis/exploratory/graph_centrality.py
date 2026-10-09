@@ -23,7 +23,7 @@ Outputs:
       figures the report prints, structured for downstream reuse)
 
 Usage:
-    python src/analysis/graph_centrality.py
+    python src/analysis/exploratory/graph_centrality.py
 """
 
 # %%
@@ -38,7 +38,7 @@ from pathlib import Path
 import networkx as nx
 from scipy import stats
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "utils"))
 from load_files import find_latest_file
 
 BETWEENNESS_SAMPLE_K = 100
