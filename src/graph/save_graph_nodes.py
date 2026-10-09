@@ -18,6 +18,23 @@ Two node types are genuinely new to OptimusKG::
       Tier I-III classification (e.g. Benign, or unclassified), because
       it's referenced by a CIViC evidence item.
 
+      Also carries civic_clinvar_gap_analysis.py's actual gap verdict,
+      which that script computes but (until now) never wrote anywhere past
+      its own CSVs/stdout: {predisposing,oncogenic,clinical_impact}_gap_candidate,
+      each True iff the variant qualifies for that track (Pathogenic/
+      Likely-pathogenic, Oncogenic/Likely-oncogenic, or Tier I-III
+      respectively) AND no referencing CIViC evidence item has the matching
+      evidence_type. This is deliberately NOT the same as
+      `not in_civic_evidence_item` — that flag is global (true if ANY
+      evidence item references the variant, regardless of type) and would
+      under-count real gaps: a variant with a PREDICTIVE evidence item but
+      no PREDISPOSING one is still a genuine predisposing gap.
+      is_gap_candidate ORs the three together; high_confidence_gap_candidate
+      additionally requires a 2-star-or-better ClinVar review status
+      (predisposing track only, mirroring civic_clinvar_gap_analysis.py's
+      own stratification — oncogenic/clinical_impact gaps aren't
+      confidence-stratified there either).
+
 Gene/Disease/Drug aren't new node types, but this script also produces
 derived, enriched copies of them adding in_civic_evidence_item/n_evidence_items/
 highest_evidence_level, aggregated from civic_resolved.csv. Gene/Disease/
@@ -29,7 +46,12 @@ found in clinvar_summary at all.
 
 Evidence item's own variant_node_ids reuses that same VariationID match:
 the ClinVar ids an evidence item references, filtered to ones that actually
-got a Variant node.
+got a Variant node. Also carries molecular_profile_is_multi_variant (from
+civic_resolved.csv) so a consumer can tell apart a variant_node_ids entry
+that resolved as the sole candidate from one that resolved as 1-of-N
+sub-variants in an "OR" molecular profile — a distinction variant_node_ids
+alone can't make, since the matching tiers union all sub-variants' ClinVar
+ids into one flat set per evidence item.
 
 Namespacing/provenance: outputs are a derived dataset that references
 OptimusKG's ids, written to data/processed/ and this can be regenerated
@@ -77,6 +99,22 @@ EVIDENCE_LEVEL_ORDER = ["A", "B", "C", "D", "E"]
 LEVEL_RANK = {lvl: i for i, lvl in enumerate(EVIDENCE_LEVEL_ORDER)}
 
 CLINVAR_TRACKS = ["predisposing", "oncogenic", "clinical_impact", "evidence_referenced"]
+
+# Same type-matching civic_clinvar_gap_analysis.py's three gap-detection
+# tracks use: a variant qualifying for a track is only a genuine gap if no
+# referencing CIViC evidence item has one of these evidence_type values.
+TRACK_REQUIRED_EVIDENCE_TYPES = {
+    "predisposing": {"PREDISPOSING"},
+    "oncogenic": {"ONCOGENIC"},
+    "clinical_impact": {"PREDICTIVE", "DIAGNOSTIC", "PROGNOSTIC"},
+}
+# Same set civic_clinvar_gap_analysis.py uses to stratify predisposing gap
+# candidates into clinically-actionable vs. database-scope noise.
+HIGH_CONFIDENCE_REVIEW_STATUSES = {
+    "criteria provided, multiple submitters, no conflicts",
+    "reviewed by expert panel",
+    "practice guideline",
+}
 
 # %%
 # ---------------------------------------------------------------------------
@@ -231,12 +269,19 @@ civic_df["clinvar_variation_ids_all"] = civic_df.apply(
 # in_civic_evidence_item is True for a variant if ANY CIViC
 # evidence item references it via any of the three tiers, regardless of
 # which classification track(s) it happened to be scoped under below.
+# evidence_type is carried alongside (not just id/level) so the
+# track-specific gap flags below can check for a *matching-type* reference,
+# not just any reference — see module docstring for why that distinction
+# matters.
 variation_id_to_evidence = {}
 for _, row in civic_df.iterrows():
     for vid in row["clinvar_variation_ids_all"]:
         variation_id_to_evidence.setdefault(vid, []).append(
-            (row["id"], row["evidence_level"])
+            (row["id"], row["evidence_level"], row["evidence_type"])
         )
+variation_id_to_evidence_types = {
+    vid: {et for _, _, et in items} for vid, items in variation_id_to_evidence.items()
+}
 
 # %%
 track_frames = []
@@ -293,6 +338,7 @@ variant_nodes = (
         somatic_clinical_impact_tier=("SomaticClinicalImpact", _first_non_null),
         variant_origin=("OriginSimple", _first_non_null),
         dbsnp_rsid=("RS# (dbSNP)", _first_non_null),
+        review_status_clinvar=("ReviewStatus", _first_non_null),
         resolved_phenotype_disease_ids=(
             "resolved_phenotype_disease_ids",
             lambda lists: sorted(set().union(*lists)) if len(lists) else [],
@@ -312,7 +358,7 @@ variant_nodes["n_evidence_items"] = variant_nodes["VariationID"].apply(
 )
 variant_nodes["highest_evidence_level"] = variant_nodes["VariationID"].apply(
     lambda vid: _best_level(
-        pd.Series([lvl for _, lvl in variation_id_to_evidence.get(vid, [])])
+        pd.Series([lvl for _, lvl, _ in variation_id_to_evidence.get(vid, [])])
     )
 )
 
@@ -321,6 +367,46 @@ print(
     f"[variant] {len(variant_nodes)} distinct ClinVar variants across "
     f"{len(CLINVAR_TRACKS)} tracks; {n_resolved} / {len(variant_nodes)} "
     f"in_civic_evidence_item"
+)
+
+# %%
+# ---------------------------------------------------------------------------
+# 2b. Type-matched gap verdict (civic_clinvar_gap_analysis.py's actual
+#     analytical output, re-derived here so it lands on the node instead of
+#     dead-ending in that script's standalone CSVs — see module docstring).
+# ---------------------------------------------------------------------------
+
+
+def _track_gap_flags(row: pd.Series) -> pd.Series:
+    referenced_types = variation_id_to_evidence_types.get(row["VariationID"], set())
+    row_tracks = set(row["tracks"])
+    return pd.Series(
+        {
+            f"{track}_gap_candidate": track in row_tracks
+            and not (referenced_types & required_types)
+            for track, required_types in TRACK_REQUIRED_EVIDENCE_TYPES.items()
+        }
+    )
+
+
+gap_flag_cols = list(TRACK_REQUIRED_EVIDENCE_TYPES)
+variant_nodes[[f"{t}_gap_candidate" for t in gap_flag_cols]] = variant_nodes.apply(
+    _track_gap_flags, axis=1
+)
+variant_nodes["is_gap_candidate"] = variant_nodes[
+    [f"{t}_gap_candidate" for t in gap_flag_cols]
+].any(axis=1)
+variant_nodes["high_confidence_gap_candidate"] = variant_nodes[
+    "predisposing_gap_candidate"
+] & variant_nodes["review_status_clinvar"].isin(HIGH_CONFIDENCE_REVIEW_STATUSES)
+
+n_gap = variant_nodes["is_gap_candidate"].sum()
+n_high_conf_gap = variant_nodes["high_confidence_gap_candidate"].sum()
+print(
+    f"[variant] {n_gap} / {len(variant_nodes)} are a type-matched gap candidate "
+    f"(qualifying classification, no matching-evidence-type CIViC evidence item); "
+    f"{n_high_conf_gap} of those are high-confidence predisposing gaps "
+    f"(review status in {sorted(HIGH_CONFIDENCE_REVIEW_STATUSES)})"
 )
 
 variant_out_path = PROCESSED_DIR / f"graph_nodes_variant_{date_str}.parquet"
@@ -357,6 +443,12 @@ evidence_item_nodes = pd.DataFrame(
         "variant_node_ids": civic_df["clinvar_variation_ids_all"].apply(
             lambda ids: sorted(f"CLINVAR_{vid}" for vid in ids if vid in variant_id_set)
         ),
+        # Without this, a resolved variant_node_ids entry is indistinguishable
+        # between "the only candidate, and it resolved" and "1 of N OR'd
+        # sub-variants resolved, the other N-1 didn't" — the molecular
+        # profile's own variant candidates aren't otherwise carried onto the
+        # EVI node.
+        "molecular_profile_is_multi_variant": civic_df["molecular_profile_is_multi_variant"],
     }
 )
 
