@@ -95,12 +95,22 @@ def paper_node_label(node_id: str, attrs: dict) -> str:
     would show the same text — so VAR nodes are labeled from their own
     hgvs_name instead, trimmed to just the protein change ("p.Val600Glu")
     when one is present, since the full HGVS string is too long to sit
-    next to a node marker."""
+    next to a node marker. Many ClinVar variants have no protein-level
+    annotation at all (non-coding, intronic, splice, UTR) — those fall
+    back to just the coding-level change ("c.340+1G>A") instead of the
+    full "NM_000551.4(VHL):c.340+1G>A" string, so every variant gets the
+    same short "prefix.change" style regardless of which level of HGVS
+    notation it actually has."""
     if attrs.get("node_type") == "VAR":
         hgvs = attrs.get("hgvs_name")
         if hgvs:
-            match = re.search(r"\(p\.[^)]+\)", hgvs)
-            return match.group(0)[1:-1] if match else str(hgvs)
+            protein_match = re.search(r"\(p\.[^)]+\)", hgvs)
+            if protein_match:
+                return protein_match.group(0)[1:-1]
+            coding_match = re.search(r"c\..+$", hgvs)
+            if coding_match:
+                return coding_match.group(0)
+            return str(hgvs)
         return node_id
     for key in ("symbol", "gene_symbol", "hgvs_name", "name"):
         if attrs.get(key):
