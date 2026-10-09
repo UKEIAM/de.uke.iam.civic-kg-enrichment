@@ -97,13 +97,13 @@ RESERVED_NODE_KEYS = {"id", "label", "name"}
 RESERVED_EDGE_KEYS = {"id", "label", "source", "target", "relation"}
 
 CATEGORY_LABELS = {
-    "fig1_hit": "Figure 1 — mechanism of action (hit)",
     "fig1_miss": "Figure 1 — mechanism of action (miss)",
+    "fig1_hit": "Figure 1 — mechanism of action (hit)",
     "fig2": "Figure 2 — drug safety context",
     "fig3": "Figure 3 — disease hierarchy",
-    "fig4": "Figure 4 — gene-disease structural gap",
-    "fig5_combination": "Figure 5 — drug interaction (COMBINATION)",
-    "fig5_substitutes": "Figure 5 — drug interaction (SUBSTITUTES)",
+    "fig4_combination": "Figure 4 — drug interaction (COMBINATION)",
+    "fig4_substitutes": "Figure 4 — drug interaction (SUBSTITUTES)",
+    "fig5": "Figure 5 — gene-disease structural gap",
     "fig6": "Figure 6 — ClinVar curation gap",
 }
 
@@ -302,26 +302,7 @@ def resolve_row_ids(G, category: str, row: dict, evi_attrs: dict) -> dict:
             if resolved:
                 ids[label] = resolved
             prev_id = resolved
-    elif category == "fig4":
-        gene_id = match_own(own_genes, row["gene"])
-        if gene_id:
-            ids[row["gene"]] = gene_id
-            if (
-                own_disease in G
-                and paper_node_label(own_disease, G.nodes[own_disease])
-                == row["civic_disease"]
-            ):
-                civic_id = own_disease
-            else:
-                civic_id = resolve_neighbor_by_label(G, gene_id, row["civic_disease"])
-            if civic_id:
-                ids[row["civic_disease"]] = civic_id
-            for gap_label in row.get("optimuskg_only_diseases") or []:
-                if gap_label not in ids:
-                    gap_id = resolve_neighbor_by_label(G, gene_id, gap_label)
-                    if gap_id:
-                        ids[gap_label] = gap_id
-    elif category in ("fig5_combination", "fig5_substitutes"):
+    elif category in ("fig4_combination", "fig4_substitutes"):
         d1 = match_own(own_drugs, row["drug_1"])
         d2 = match_own(own_drugs, row["drug_2"])
         if d1:
@@ -341,6 +322,25 @@ def resolve_row_ids(G, category: str, row: dict, evi_attrs: dict) -> dict:
                 resolved = match_own(own_variants, variant_label)
                 if resolved:
                     ids[variant_label] = resolved
+    elif category == "fig5":
+        gene_id = match_own(own_genes, row["gene"])
+        if gene_id:
+            ids[row["gene"]] = gene_id
+            if (
+                own_disease in G
+                and paper_node_label(own_disease, G.nodes[own_disease])
+                == row["civic_disease"]
+            ):
+                civic_id = own_disease
+            else:
+                civic_id = resolve_neighbor_by_label(G, gene_id, row["civic_disease"])
+            if civic_id:
+                ids[row["civic_disease"]] = civic_id
+            for gap_label in row.get("optimuskg_only_diseases") or []:
+                if gap_label not in ids:
+                    gap_id = resolve_neighbor_by_label(G, gene_id, gap_label)
+                    if gap_id:
+                        ids[gap_label] = gap_id
     elif category == "fig6":
         # No EVI here — the variant id IS already a real graph id (unlike
         # every other category's pseudo-id-as-label nodes), so it resolves
@@ -367,7 +367,7 @@ def attach_graph_attrs(nodes: list, edges: list, G, id_map: dict) -> None:
     edges, source/target/relation) are left alone so the on-canvas
     caption and the graph's wiring don't change — "relation" specifically
     stays protected because a few figures deliberately set it to a
-    cosmetic/abbreviated value (e.g. Figure 5's "SYN_INT", Figure 4's
+    cosmetic/abbreviated value (e.g. Figure 4's "SYN_INT", Figure 5's
     "CIViC"/"OptimusKG only") rather than the real edge attribute's own
     value; the real attributes may include their own "name"/"relation"-
     like fields under different keys, still fully visible on click."""
@@ -502,26 +502,6 @@ def build_fig3(row: dict) -> tuple[list, list]:
 
 
 def build_fig4(row: dict) -> tuple[list, list]:
-    evi, gene, civic_dis = row["evi"], row["gene"], row["civic_disease"]
-    nodes = [make_node(evi, "EVI"), make_node(gene, "GEN"), make_node(civic_dis, "DIS")]
-    edges = [
-        make_edge("e0", evi, gene, "CONTEXT"),
-        make_edge("e1", gene, civic_dis, "HIGHLIGHT", "CIViC"),
-    ]
-    # optimuskg_only_diseases is already the diversity-preferring top-10
-    # selected server-side (see find_figure_candidates.py) — every one of
-    # them is a highlighted "structural gap" sibling of civic_dis, not a
-    # single example, so they're all first-class HIGHLIGHT nodes rather
-    # than gray context.
-    for i, gap_dis in enumerate(row.get("optimuskg_only_diseases") or []):
-        if gap_dis == civic_dis:
-            continue
-        nodes.append(make_node(gap_dis, "DIS"))
-        edges.append(make_edge(f"e-gap-{i}", gene, gap_dis, "HIGHLIGHT", "OptimusKG only"))
-    return nodes, edges
-
-
-def build_fig5(row: dict) -> tuple[list, list]:
     evi, d1, d2 = row["evi"], row["drug_1"], row["drug_2"]
     nodes = [make_node(evi, "EVI"), make_node(d1, "DRG"), make_node(d2, "DRG")]
     edges = [
@@ -541,6 +521,26 @@ def build_fig5(row: dict) -> tuple[list, list]:
         nodes.append(make_node(drug, "DRG"))
         edges.append(make_edge(f"e-drug-{i}", evi, drug, "CONTEXT"))
     add_variant_context(nodes, edges, evi, row.get("all_variants"), seen)
+    return nodes, edges
+
+
+def build_fig5(row: dict) -> tuple[list, list]:
+    evi, gene, civic_dis = row["evi"], row["gene"], row["civic_disease"]
+    nodes = [make_node(evi, "EVI"), make_node(gene, "GEN"), make_node(civic_dis, "DIS")]
+    edges = [
+        make_edge("e0", evi, gene, "CONTEXT"),
+        make_edge("e1", gene, civic_dis, "HIGHLIGHT", "CIViC"),
+    ]
+    # optimuskg_only_diseases is already the diversity-preferring top-10
+    # selected server-side (see find_figure_candidates.py) — every one of
+    # them is a highlighted "structural gap" sibling of civic_dis, not a
+    # single example, so they're all first-class HIGHLIGHT nodes rather
+    # than gray context.
+    for i, gap_dis in enumerate(row.get("optimuskg_only_diseases") or []):
+        if gap_dis == civic_dis:
+            continue
+        nodes.append(make_node(gap_dis, "DIS"))
+        edges.append(make_edge(f"e-gap-{i}", gene, gap_dis, "HIGHLIGHT", "OptimusKG only"))
     return nodes, edges
 
 
@@ -575,43 +575,43 @@ def build_fig6(row: dict) -> tuple[list, list]:
 
 
 BUILDERS = {
-    "fig1_hit": build_fig1_hit,
     "fig1_miss": build_fig1_miss,
+    "fig1_hit": build_fig1_hit,
     "fig2": build_fig2,
     "fig3": build_fig3,
-    "fig4": build_fig4,
-    "fig5_combination": build_fig5,
-    "fig5_substitutes": build_fig5,
+    "fig4_combination": build_fig4,
+    "fig4_substitutes": build_fig4,
+    "fig5": build_fig5,
     "fig6": build_fig6,
 }
 
 
 def row_summary(category: str, row: dict) -> str:
-    if category in ("fig1_hit",):
-        return f"{row['evi']}: {row['gene']} / {row['drug']} — {row['relation']}"
     if category == "fig1_miss":
         return (
             f"{row['evi']}: {row['gene']} / {row['drug']} — bridge {row['bridge_gene']}"
         )
+    if category in ("fig1_hit",):
+        return f"{row['evi']}: {row['gene']} / {row['drug']} — {row['relation']}"
     if category == "fig2":
         return f"{row['evi']}: {row['drug']} — {len(row['contraindications'])} contraindications"
     if category == "fig3":
         return f"{row['evi']}: " + " -> ".join(row["chain"])
-    if category == "fig4":
+    if category in ("fig4_combination", "fig4_substitutes"):
+        return f"{row['evi']}: {row['drug_1']} + {row['drug_2']}"
+    if category == "fig5":
         n_total = row.get("optimuskg_only_diseases_total", len(row.get("optimuskg_only_diseases") or []))
         return (
             f"{row['evi']}: {row['gene']} — civic: {row['civic_disease']}, "
             f"gap: {n_total} optimuskg-only diseases"
         )
-    if category in ("fig5_combination", "fig5_substitutes"):
-        return f"{row['evi']}: {row['drug_1']} + {row['drug_2']}"
     if category == "fig6":
         return f"{row['variant']} ({row['gene']}): {row['track']} = {row['classification']}"
     return row.get("evi", str(row))
 
 
-st.set_page_config(page_title="Figure candidate browser", layout="wide")
-st.title("Figure candidate browser")
+st.set_page_config(page_title="GRACE - Interactive candidate explorer", layout="wide")
+st.title("GRACE - Interactive candidate explorer")
 
 report, report_path = load_report()
 st.caption(f"Source: `{report_path}` (graph snapshot: {report.get('graph_snapshot')})")

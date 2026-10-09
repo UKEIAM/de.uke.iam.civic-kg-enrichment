@@ -4,8 +4,12 @@ Step 1 of building the paper's figures — run this before
 src/app/candidate_browser.py (the Streamlit app the paper's actual figures
 were picked and exported from). Surveys candidate evidence items for each
 figure's story and prints (and saves) the top N, so a specific example can
-be picked from the app (Figure 4 needs no manual pick — its own search is
-deterministic). Each search dedupes to one row per EVI.
+be picked from the app. Each search dedupes to one row per EVI.
+
+Figure numbering matches the paper: 1 mechanism of action (miss presented
+before hit), 2 drug safety/contraindications, 3 disease hierarchy, 4
+adverse drug interactions (synergistic interaction), 5 gene-disease
+structural gap, 6 ClinVar variant gap.
 
 src/analysis/exploratory/graph_ego_figures.py is an earlier, superseded
 approach to building these same 5 figures directly via matplotlib/
@@ -52,8 +56,8 @@ PINNED_EVI_IDS: dict[str, list[str]] = {
     "fig1_miss": ["CIVICEVI_2880"],
     "fig2": ["CIVICEVI_1988"],
     "fig3": ["CIVICEVI_2475"],
-    "fig4": ["CIVICEVI_9220"],
-    "fig5_combination": ["CIVICEVI_677"],
+    "fig4_combination": ["CIVICEVI_677"],
+    "fig5": ["CIVICEVI_9220"],
 }
 
 
@@ -200,13 +204,6 @@ for eid, a in predictive:
             break
 
 print(
-    f"\n[Fig1 hit] {len(hit_candidates)} candidates (single-gene/drug PREDICTIVE "
-    f"EVIs, direct DRG-GEN relation)"
-)
-for eid, gene, drug, rel in hit_candidates[:TOP_N]:
-    print(f"  {eid}: {label(gene)} / {label(drug)} — {rel}")
-
-print(
     f"\n[Fig1 miss] {len(miss_candidates)} candidates (no direct relation, "
     f"GEN-GEN bridge exists)"
 )
@@ -214,16 +211,13 @@ miss_top = pin_first(miss_candidates, PINNED_EVI_IDS["fig1_miss"], TOP_N)
 for eid, gene, drug, bridge, rel in miss_top:
     print(f"  {eid}: {label(gene)} / {label(drug)} — bridge {label(bridge)} ({rel})")
 
-report["fig1_hit"] = {
-    "total": len(hit_candidates),
-    "top": [
-        {
-            "evi": eid, "gene": label(gene), "drug": label(drug), "relation": rel,
-            "all_variants": all_variant_labels(eid),
-        }
-        for eid, gene, drug, rel in hit_candidates[:TOP_N]
-    ],
-}
+print(
+    f"\n[Fig1 hit] {len(hit_candidates)} candidates (single-gene/drug PREDICTIVE "
+    f"EVIs, direct DRG-GEN relation)"
+)
+for eid, gene, drug, rel in hit_candidates[:TOP_N]:
+    print(f"  {eid}: {label(gene)} / {label(drug)} — {rel}")
+
 report["fig1_miss"] = {
     "total": len(miss_candidates),
     "top": [
@@ -233,6 +227,16 @@ report["fig1_miss"] = {
             "all_variants": all_variant_labels(eid),
         }
         for eid, gene, drug, bridge, rel in miss_top
+    ],
+}
+report["fig1_hit"] = {
+    "total": len(hit_candidates),
+    "top": [
+        {
+            "evi": eid, "gene": label(gene), "drug": label(drug), "relation": rel,
+            "all_variants": all_variant_labels(eid),
+        }
+        for eid, gene, drug, rel in hit_candidates[:TOP_N]
     ],
 }
 
@@ -334,14 +338,86 @@ report["fig3"] = {
 
 # %%
 # ---------------------------------------------------------------------------
-# Figure 4: EVI with a resolved gene+disease where the gene has native
+# Figure 4: EVI with >=2 resolved drugs where a direct native
+# SYNERGISTIC_INTERACTION edge exists between two of them. Despite the
+# name, this relation is sourced entirely from DrugBank's drug-drug
+# INTERACTION data (checked directly: 0/157,329 descriptions carry
+# positive-synergy language; all are pharmacokinetic/toxicity cautions) —
+# so this is a safety flag, not a validation that a combination works.
+# Split by the EVI's own therapy_interaction_type: COMBINATION (drugs
+# actually co-administered — flags a real interaction risk within CIViC's
+# own combination claim) vs. SUBSTITUTES (interchangeable alternatives — a
+# different, not-yet-built story about flagging a risk between drugs
+# that aren't meant to be combined at all). One row per EVI, first
+# qualifying drug pair highlighted — but all_drugs/all_variants carry
+# every drug/variant the EVI itself resolves to (not just the interacting
+# pair), so the figure can show the full regimen/molecular context, not
+# just the two drugs that happen to have a flagged interaction.
+# ---------------------------------------------------------------------------
+
+fig4_combination = []
+fig4_substitutes = []
+for eid, a in evi_nodes.items():
+    drugs = [d for d in (a.get("drug_node_ids") or []) if d]
+    if len(drugs) < 2:
+        continue
+    therapy_type = a.get("therapy_interaction_type")
+    pair = None
+    for i in range(len(drugs)):
+        for j in range(i + 1, len(drugs)):
+            if frozenset((drugs[i], drugs[j])) in drg_drg_interaction:
+                pair = (drugs[i], drugs[j])
+                break
+        if pair:
+            break
+    if not pair:
+        continue
+    if therapy_type == "COMBINATION":
+        fig4_combination.append((eid, *pair))
+    elif therapy_type == "SUBSTITUTES":
+        fig4_substitutes.append((eid, *pair))
+
+print(
+    f"\n[Fig4] {len(fig4_combination)} COMBINATION EVIs with a corroborating "
+    f"native interaction, {len(fig4_substitutes)} SUBSTITUTES EVIs likewise"
+)
+fig4_combination_top = pin_first(fig4_combination, PINNED_EVI_IDS["fig4_combination"], TOP_N)
+for eid, d1, d2 in fig4_combination_top:
+    print(f"  {eid}: {label(d1)} + {label(d2)}")
+
+def fig4_row(eid: str, d1: str, d2: str) -> dict:
+    # An EVI's drug_node_ids/variant_node_ids can reference an id that
+    # isn't actually a node in this cancer-scoped graph (e.g. a drug
+    # outside its scoped drug population) — skip those rather than crash.
+    a = evi_nodes[eid]
+    return {
+        "evi": eid,
+        "drug_1": label(d1),
+        "drug_2": label(d2),
+        "all_drugs": [label(d) for d in (a.get("drug_node_ids") or []) if d and d in CSG],
+        "all_variants": all_variant_labels(eid),
+    }
+
+
+report["fig4_combination"] = {
+    "total": len(fig4_combination),
+    "top": [fig4_row(eid, d1, d2) for eid, d1, d2 in fig4_combination_top],
+}
+report["fig4_substitutes"] = {
+    "total": len(fig4_substitutes),
+    "top": [fig4_row(eid, d1, d2) for eid, d1, d2 in fig4_substitutes[:TOP_N]],
+}
+
+# %%
+# ---------------------------------------------------------------------------
+# Figure 5: EVI with a resolved gene+disease where the gene has native
 # GEN-DIS edges (origin == ["optimuskg"] only) to OTHER diseases — i.e.
 # structurally connected but never reviewed by CIViC. Reformulated to
 # surface ALL such diseases per gene (previously just the first match) —
 # CIViC-aligned genes turn out to have hundreds of these on average
 # (verified directly against the graph: median 610, max 1866 across the
 # 337 CIViC-aligned genes), far too many to show at once, so the top
-# FIG4_TOP_DISEASES are selected to prefer diverse examples: a greedy
+# FIG5_TOP_DISEASES are selected to prefer diverse examples: a greedy
 # pick that skips a candidate disease if it shares a DIS-DIS/PARENT
 # "family" with one already picked — the same connected hierarchy
 # cluster, reached by walking PARENT edges in either direction, so two
@@ -352,17 +428,18 @@ report["fig3"] = {
 # directly against 5 real examples, the stricter version sometimes yields
 # well under 10 truly-diverse diseases (as few as 2 for one gene whose
 # candidates cluster into one or two large hereditary-syndrome families)
-# — the fallback below still pads out to FIG4_TOP_DISEASES with
+# — the fallback below still pads out to FIG5_TOP_DISEASES with
 # (possibly related) leftovers in that case, since showing fewer than 10
 # is worse than showing 10 with a few related ones mixed in.
 # This is the one search that's also committed, unmodified, in
 # graph_ego_figures.py's build_figure4_gene_disease_gap() (which picks a
-# single hardcoded example for the paper's static figure) — not updated
-# here, since this reformulation is specifically for find_figure_candidates.py's
-# own candidate listing and the Streamlit browser, not the paper figure itself.
+# single hardcoded example for the paper's static figure, under that
+# script's own, unrenumbered FIG4 naming) — not updated here, since this
+# reformulation is specifically for find_figure_candidates.py's own
+# candidate listing and the Streamlit browser, not the paper figure itself.
 # ---------------------------------------------------------------------------
 
-FIG4_TOP_DISEASES = 10
+FIG5_TOP_DISEASES = 10
 
 _dis_family_cache: dict[str, set[str]] = {}
 
@@ -408,7 +485,7 @@ def diverse_top_n(candidates: list[str], n: int) -> list[str]:
     return selected
 
 
-fig4_candidates = []
+fig5_candidates = []
 for eid, a in evi_nodes.items():
     if not (a.get("gene_node_ids") and a.get("disease_node_id")):
         continue
@@ -420,104 +497,32 @@ for eid, a in evi_nodes.items():
             if dis != own_dis and origin == ["optimuskg"]
         )
         if others:
-            fig4_candidates.append((eid, gene, own_dis, others))
+            fig5_candidates.append((eid, gene, own_dis, others))
             break
 
-print(f"\n[Fig4] {len(fig4_candidates)} EVIs with >=1 qualifying gene-disease gap")
-fig4_top = pin_first(fig4_candidates, PINNED_EVI_IDS["fig4"], TOP_N)
-for eid, gene, own_dis, others in fig4_top:
-    top_others = diverse_top_n(others, FIG4_TOP_DISEASES)
+print(f"\n[Fig5] {len(fig5_candidates)} EVIs with >=1 qualifying gene-disease gap")
+fig5_top = pin_first(fig5_candidates, PINNED_EVI_IDS["fig5"], TOP_N)
+for eid, gene, own_dis, others in fig5_top:
+    top_others = diverse_top_n(others, FIG5_TOP_DISEASES)
     print(
         f"  {eid}: {label(gene)} — civic: {label(own_dis)}, optimuskg-only "
         f"({len(others)} total, top {len(top_others)} shown): "
         f"{', '.join(label(d) for d in top_others)}"
     )
 
-report["fig4"] = {
-    "total": len(fig4_candidates),
+report["fig5"] = {
+    "total": len(fig5_candidates),
     "top": [
         {
             "evi": eid, "gene": label(gene),
             "civic_disease": label(own_dis),
             "optimuskg_only_diseases": [
-                label(d) for d in diverse_top_n(others, FIG4_TOP_DISEASES)
+                label(d) for d in diverse_top_n(others, FIG5_TOP_DISEASES)
             ],
             "optimuskg_only_diseases_total": len(others),
         }
-        for eid, gene, own_dis, others in fig4_top
+        for eid, gene, own_dis, others in fig5_top
     ],
-}
-
-# %%
-# ---------------------------------------------------------------------------
-# Figure 5: EVI with >=2 resolved drugs where a direct native
-# SYNERGISTIC_INTERACTION edge exists between two of them. Despite the
-# name, this relation is sourced entirely from DrugBank's drug-drug
-# INTERACTION data (checked directly: 0/157,329 descriptions carry
-# positive-synergy language; all are pharmacokinetic/toxicity cautions) —
-# so this is a safety flag, not a validation that a combination works.
-# Split by the EVI's own therapy_interaction_type: COMBINATION (drugs
-# actually co-administered — flags a real interaction risk within CIViC's
-# own combination claim) vs. SUBSTITUTES (interchangeable alternatives — a
-# different, not-yet-built story about flagging a risk between drugs
-# that aren't meant to be combined at all). One row per EVI, first
-# qualifying drug pair highlighted — but all_drugs/all_variants carry
-# every drug/variant the EVI itself resolves to (not just the interacting
-# pair), so the figure can show the full regimen/molecular context, not
-# just the two drugs that happen to have a flagged interaction.
-# ---------------------------------------------------------------------------
-
-fig5_combination = []
-fig5_substitutes = []
-for eid, a in evi_nodes.items():
-    drugs = [d for d in (a.get("drug_node_ids") or []) if d]
-    if len(drugs) < 2:
-        continue
-    therapy_type = a.get("therapy_interaction_type")
-    pair = None
-    for i in range(len(drugs)):
-        for j in range(i + 1, len(drugs)):
-            if frozenset((drugs[i], drugs[j])) in drg_drg_interaction:
-                pair = (drugs[i], drugs[j])
-                break
-        if pair:
-            break
-    if not pair:
-        continue
-    if therapy_type == "COMBINATION":
-        fig5_combination.append((eid, *pair))
-    elif therapy_type == "SUBSTITUTES":
-        fig5_substitutes.append((eid, *pair))
-
-print(
-    f"\n[Fig5] {len(fig5_combination)} COMBINATION EVIs with a corroborating "
-    f"native interaction, {len(fig5_substitutes)} SUBSTITUTES EVIs likewise"
-)
-fig5_combination_top = pin_first(fig5_combination, PINNED_EVI_IDS["fig5_combination"], TOP_N)
-for eid, d1, d2 in fig5_combination_top:
-    print(f"  {eid}: {label(d1)} + {label(d2)}")
-
-def fig5_row(eid: str, d1: str, d2: str) -> dict:
-    # An EVI's drug_node_ids/variant_node_ids can reference an id that
-    # isn't actually a node in this cancer-scoped graph (e.g. a drug
-    # outside its scoped drug population) — skip those rather than crash.
-    a = evi_nodes[eid]
-    return {
-        "evi": eid,
-        "drug_1": label(d1),
-        "drug_2": label(d2),
-        "all_drugs": [label(d) for d in (a.get("drug_node_ids") or []) if d and d in CSG],
-        "all_variants": all_variant_labels(eid),
-    }
-
-
-report["fig5_combination"] = {
-    "total": len(fig5_combination),
-    "top": [fig5_row(eid, d1, d2) for eid, d1, d2 in fig5_combination_top],
-}
-report["fig5_substitutes"] = {
-    "total": len(fig5_substitutes),
-    "top": [fig5_row(eid, d1, d2) for eid, d1, d2 in fig5_substitutes[:TOP_N]],
 }
 
 # %%
