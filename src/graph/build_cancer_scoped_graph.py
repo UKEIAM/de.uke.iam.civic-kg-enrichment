@@ -19,14 +19,14 @@ edges restricted to that scope, except:
       (CIViC-enriched and bare OptimusKG-only alike).
 
 Inputs:
-    - data/processed/evidence_graph_*.pkl (from build_evidence_graph.py)
+    - data/graphs/evidence_graph_*.pkl (from build_evidence_graph.py)
     - data/processed/cancer_relevant_disease_ids_*.csv (from civic_optimuskg_alignment.py)
     - data/processed/cancer_scoped_variant_{nodes,gene_edges,disease_edges}_*.parquet
       (from build_cancer_scoped_variants.py)
     - data/raw/optimuskg/optimuskg_lcc_graph_*.pkl (the raw OptimusKG pickle)
 Outputs:
-    - data/processed/cancer_scoped_graph_<date>.pkl
-    - data/processed/cancer_scoped_graph_<date>_metadata.json
+    - data/graphs/cancer_scoped_graph_<date>.pkl
+    - data/graphs/cancer_scoped_graph_<date>_metadata.json
 
 Usage:
     python src/graph/build_cancer_scoped_graph.py
@@ -50,6 +50,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
 from load_files import find_latest_file
 
 PROCESSED_DIR = Path("data/processed")
+GRAPHS_DIR = Path("data/graphs")  # final graph pickles, read/written here;
+GRAPHS_DIR.mkdir(parents=True, exist_ok=True)  # intermediate CSVs/parquets stay in PROCESSED_DIR
 date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 DENSE_EXCLUDED_NATIVE = {"ANA-GEN"}
@@ -79,7 +81,7 @@ KEPT_OVERLAY_EDGE_TYPES = {
 # build_cancer_scoped_variants.py's widened variant tables.
 # ---------------------------------------------------------------------------
 
-evidence_graph_path = find_latest_file(PROCESSED_DIR, "evidence_graph_*.pkl")
+evidence_graph_path = find_latest_file(GRAPHS_DIR, "evidence_graph_*.pkl")
 print(f"[load] {evidence_graph_path}")
 t0 = time.time()
 with open(evidence_graph_path, "rb") as f:
@@ -244,7 +246,13 @@ del OKG  # free the 6.8GB graph before assembling the final graph
 
 G = nx.DiGraph()
 
-for n in cancer_gdd_ids | all_evi_ids:
+# sorted(), not a bare set union: node insertion order here fixes the
+# iteration order find_figure_candidates.py's evi_nodes dict inherits (dict
+# order = insertion order), which otherwise varies run-to-run with Python's
+# randomized string-hash seed and silently reshuffles which EVIs land in
+# each figure's saved top-N — confirmed by rerunning the pipeline twice with
+# zero other changes and getting two different top-15 lists per figure.
+for n in sorted(cancer_gdd_ids | all_evi_ids):
     G.add_node(n, **gdd_evi_node_attrs[n])
 
 for row in b0a_variant_nodes:
@@ -338,7 +346,7 @@ print(
     f"VAR-EVI edge (the rest are gap candidates by construction)"
 )
 
-graph_path = PROCESSED_DIR / f"cancer_scoped_graph_{date_str}.pkl"
+graph_path = GRAPHS_DIR / f"cancer_scoped_graph_{date_str}.pkl"
 with open(graph_path, "wb") as f:
     pickle.dump(G, f)
 print(f"\n[save] wrote {graph_path}")
@@ -366,7 +374,7 @@ metadata = {
     "raw_labels_skipped_in_stage_2": sorted(RAW_LABELS_SKIPPED),
     "n_ana_gen_excluded": n_excluded_ana_gen,
 }
-metadata_path = PROCESSED_DIR / f"cancer_scoped_graph_{date_str}_metadata.json"
+metadata_path = GRAPHS_DIR / f"cancer_scoped_graph_{date_str}_metadata.json"
 with open(metadata_path, "w") as f:
     json.dump(metadata, f, indent=2)
 print(f"[save] wrote {metadata_path}")
