@@ -1,11 +1,12 @@
-# GRACE — CIViC × ClinVar × OptimusKG cancer knowledge graph enrichment
+# GRACE: A Graph-Based Resource for Aligned Cancer Evidence That Enables Guided Clinical Exploration and Mechanistic Insights
 
 Builds a cancer-focused knowledge graph by enriching OptimusKG (the
 `optimuskg` package, see `requirements.txt`) with curated evidence from
-[CIViC](https://civicdb.org/) and [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/),
-then surfaces candidate examples for figures (mechanism of action, drug safety,
-disease hierarchy, drug interactions, structural gaps, variant curation gaps)
-through an interactive Streamlit app, **GRACE**.
+[CIViC](https://civicdb.org/) and [ClinVar](https://www.ncbi.nlm.nih.gov/clinvar/). 
+contextualizes curated evidence with drug mechanisms, safety information and disease 
+hierarchies, and exposes gene-disease and variant-level curation gap candidates.
+Sripts to populate a Neo4j AuraDB instance and a setup a (local) web application
+are provided.
 
 ## Setup
 
