@@ -39,10 +39,21 @@ disease) is found by searching the relevant neighbor's real edges for a
 label match — nodes that can't be resolved this way just keep their
 minimal JSON-only data.
 
+Figure 6 has no EVI to anchor its context on (the story is the absence of
+one), so get_fig6_context() builds it from two edge types instead: the
+gene's other ClinVar variants that genuinely have matching-type CIViC
+coverage for the SAME track as the gap variant (VAR-GEN, filtered on
+qualifying for that track AND not themselves being a gap candidate for
+it) — not just "has >=1 evidence item of any kind," since a variant can
+have an unrelated-type evidence item while still being a genuine gap for
+the track being highlighted — plus the gap variant's own disease/
+phenotype associations (VAR-DIS). Each is capped and truncation-counted
+independently, same as get_context_entities().
+
 Inputs:
     - data/processed/find_figure_candidates/find_figure_candidates_*.json
       (from find_figure_candidates.py)
-    - data/processed/cancer_scoped_graph_*.pkl (only if "load full graph" is used)
+    - data/graphs/cancer_scoped_graph_*.pkl (only if "load full graph" is used)
 
 Usage:
     streamlit run src/app/candidate_browser.py
@@ -56,15 +67,34 @@ import streamlit as st
 from st_link_analysis import EdgeStyle, NodeStyle, st_link_analysis
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "utils"))
-from graph_viz import NODE_COLORS, NODE_TYPE_LABELS, format_attr_value, paper_node_label  # noqa: E402
+from graph_viz import (  # noqa: E402
+    NODE_COLORS,
+    NODE_TYPE_LABELS,
+    format_attr_value,
+    paper_node_label,
+)
 from load_files import find_latest_file  # noqa: E402
 
 CONTEXT_COLOR = "#B0B0B0"
 HIGHLIGHT_COLOR = "#DC267F"
 MAX_CONTEXT_NODES = 12
+EDGE_LABEL_TEXT_COLOR = "#FFFFFF"
+
+
+class WhiteLabelEdgeStyle(EdgeStyle):
+    """EdgeStyle doesn't expose edge-label text color (its dump() only
+    ever sets line/background/arrow color, never Cytoscape.js's own
+    "color" style property for label text) — the pink HIGHLIGHT/CHAIN
+    line color makes a dark caption hard to read, so this subclass adds
+    white label text on top of whatever EdgeStyle already produces."""
+
+    def dump(self) -> dict:
+        style = super().dump()
+        style["style"]["color"] = EDGE_LABEL_TEXT_COLOR
+        return style
 MAX_ATTR_LEN = 500
 RESERVED_NODE_KEYS = {"id", "label", "name"}
-RESERVED_EDGE_KEYS = {"id", "label", "source", "target"}
+RESERVED_EDGE_KEYS = {"id", "label", "source", "target", "relation"}
 
 CATEGORY_LABELS = {
     "fig1_hit": "Figure 1 — mechanism of action (hit)",
@@ -74,26 +104,33 @@ CATEGORY_LABELS = {
     "fig4": "Figure 4 — gene-disease structural gap",
     "fig5_combination": "Figure 5 — drug interaction (COMBINATION)",
     "fig5_substitutes": "Figure 5 — drug interaction (SUBSTITUTES)",
+    "fig6": "Figure 6 — ClinVar curation gap",
 }
 
 
 @st.cache_data
 def load_report() -> dict:
-    path = find_latest_file("data/processed/find_figure_candidates", "find_figure_candidates_*.json")
+    path = find_latest_file(
+        "data/processed/find_figure_candidates", "find_figure_candidates_*.json"
+    )
     import json
 
     with open(path) as f:
         return json.load(f), str(path)
 
 
-@st.cache_resource(show_spinner="Loading full graph (one-time, ~20s — cached for the rest of this session)...")
+@st.cache_resource(
+    show_spinner="Loading full graph (one-time, ~20s — cached for the rest of this session)..."
+)
 def load_graph():
-    path = find_latest_file("data/processed", "cancer_scoped_graph_*.pkl")
+    path = find_latest_file("data/graphs", "cancer_scoped_graph_*.pkl")
     with open(path, "rb") as f:
         return pickle.load(f)
 
 
-def get_context_entities(G, evi_id: str, exclude_labels: set, cap: int = MAX_CONTEXT_NODES) -> tuple[list, int]:
+def get_context_entities(
+    G, evi_id: str, exclude_labels: set, cap: int = MAX_CONTEXT_NODES
+) -> tuple[list, int]:
     """Other genes/drugs/disease/variants the EVI itself resolves to,
     same fields as graph_ego_figures.py's other_resolved_nodes(). Returns
     (label, node_type, real_node_id) triples — the label doubles as this
@@ -126,7 +163,74 @@ def get_context_entities(G, evi_id: str, exclude_labels: set, cap: int = MAX_CON
     return entities[:cap], max(0, len(entities) - cap)
 
 
-def resolve_neighbor_by_label(G, anchor_id: str | None, target_label: str) -> str | None:
+def _neighbors_by_edge_type(G, anchor_id: str, edge_type: str) -> set:
+    neighbors = set()
+    for _, v, d in G.out_edges(anchor_id, data=True):
+        if d.get("edge_type") == edge_type:
+            neighbors.add(v)
+    for u, _, d in G.in_edges(anchor_id, data=True):
+        if d.get("edge_type") == edge_type:
+            neighbors.add(u)
+    return neighbors
+
+
+def get_fig6_context(
+    G, gene_id: str, variant_id: str, track: str, exclude_labels: set,
+    cap: int = MAX_CONTEXT_NODES,
+) -> dict:
+    """Figure 6 has no EVI to pull "other resolved entities" from (see
+    build_fig6), so its context is assembled from two edge types instead:
+    the gene's other ClinVar variants that genuinely have matching-type
+    CIViC coverage for the SAME track as the gap variant (VAR-GEN,
+    filtered on qualifying for `track` AND not being a `{track}_gap_candidate`
+    themselves) — plus the gap variant's own disease/phenotype
+    associations (VAR-DIS).
+
+    Deliberately NOT just "has >=1 CIViC evidence item of any kind"
+    (the global in_civic_evidence_item flag): a variant can have, say, a
+    PREDICTIVE evidence item while still being a genuine PREDISPOSING
+    gap — the same type-matching distinction save_graph_nodes.py's
+    {track}_gap_candidate fields exist for in the first place (see that
+    script's module docstring). Showing such a variant as "covered"
+    context would misrepresent it as resolving the same kind of gap the
+    highlighted variant has. Requiring membership in `track` as well
+    (not just "not a gap for track") also excludes variants that don't
+    even carry that classification at all — {track}_gap_candidate is
+    trivially False for those, not a meaningful "covered" signal.
+
+    Returns {"other_variants": (entities, truncated), "diseases": (...)},
+    same (label, node_type, real_id) shape and per-category cap as
+    get_context_entities()."""
+    seen = set(exclude_labels)
+
+    def collect(anchor_id: str, edge_type: str, require_track_covered: bool = False) -> tuple[list, int]:
+        entities = []
+        for node_id in _neighbors_by_edge_type(G, anchor_id, edge_type):
+            if node_id == variant_id or node_id not in G:
+                continue
+            attrs = G.nodes[node_id]
+            if require_track_covered:
+                if track not in (attrs.get("tracks") or []):
+                    continue
+                if attrs.get(f"{track}_gap_candidate"):
+                    continue
+            label = paper_node_label(node_id, attrs)
+            if label in seen:
+                continue
+            seen.add(label)
+            entities.append((label, attrs.get("node_type", "?"), node_id))
+        entities.sort(key=lambda e: e[0])
+        return entities[:cap], max(0, len(entities) - cap)
+
+    return {
+        "other_variants": collect(gene_id, "VAR-GEN", require_track_covered=True),
+        "diseases": collect(variant_id, "VAR-DIS"),
+    }
+
+
+def resolve_neighbor_by_label(
+    G, anchor_id: str | None, target_label: str
+) -> str | None:
     """Best-effort real graph node id for `target_label` among
     `anchor_id`'s direct neighbors — resolves display-label-only
     entities (a bridge gene, a contraindicated phenotype, a disease
@@ -156,6 +260,7 @@ def resolve_row_ids(G, category: str, row: dict, evi_attrs: dict) -> dict:
 
     own_genes = list(evi_attrs.get("gene_node_ids") or [])
     own_drugs = list(evi_attrs.get("drug_node_ids") or [])
+    own_variants = list(evi_attrs.get("variant_node_ids") or [])
     own_disease = evi_attrs.get("disease_node_id")
     ids: dict = {}
 
@@ -170,6 +275,11 @@ def resolve_row_ids(G, category: str, row: dict, evi_attrs: dict) -> dict:
             bridge_id = resolve_neighbor_by_label(G, gene_id, row["bridge_gene"])
             if bridge_id:
                 ids[row["bridge_gene"]] = bridge_id
+        for variant_label in row.get("all_variants") or []:
+            if variant_label not in ids:
+                resolved = match_own(own_variants, variant_label)
+                if resolved:
+                    ids[variant_label] = resolved
     elif category == "fig2":
         drug_id = match_own(own_drugs, row["drug"])
         if drug_id:
@@ -181,7 +291,11 @@ def resolve_row_ids(G, category: str, row: dict, evi_attrs: dict) -> dict:
     elif category == "fig3":
         prev_id = own_disease
         for label in row["chain"]:
-            if prev_id and prev_id in G and paper_node_label(prev_id, G.nodes[prev_id]) == label:
+            if (
+                prev_id
+                and prev_id in G
+                and paper_node_label(prev_id, G.nodes[prev_id]) == label
+            ):
                 resolved = prev_id
             else:
                 resolved = resolve_neighbor_by_label(G, prev_id, label)
@@ -192,15 +306,21 @@ def resolve_row_ids(G, category: str, row: dict, evi_attrs: dict) -> dict:
         gene_id = match_own(own_genes, row["gene"])
         if gene_id:
             ids[row["gene"]] = gene_id
-            if own_disease in G and paper_node_label(own_disease, G.nodes[own_disease]) == row["civic_disease"]:
+            if (
+                own_disease in G
+                and paper_node_label(own_disease, G.nodes[own_disease])
+                == row["civic_disease"]
+            ):
                 civic_id = own_disease
             else:
                 civic_id = resolve_neighbor_by_label(G, gene_id, row["civic_disease"])
-            gap_id = resolve_neighbor_by_label(G, gene_id, row["optimuskg_only_disease"])
             if civic_id:
                 ids[row["civic_disease"]] = civic_id
-            if gap_id:
-                ids[row["optimuskg_only_disease"]] = gap_id
+            for gap_label in row.get("optimuskg_only_diseases") or []:
+                if gap_label not in ids:
+                    gap_id = resolve_neighbor_by_label(G, gene_id, gap_label)
+                    if gap_id:
+                        ids[gap_label] = gap_id
     elif category in ("fig5_combination", "fig5_substitutes"):
         d1 = match_own(own_drugs, row["drug_1"])
         d2 = match_own(own_drugs, row["drug_2"])
@@ -208,6 +328,28 @@ def resolve_row_ids(G, category: str, row: dict, evi_attrs: dict) -> dict:
             ids[row["drug_1"]] = d1
         if d2:
             ids[row["drug_2"]] = d2
+        # all_drugs/all_variants cover every drug/variant the EVI resolves
+        # to, not just the highlighted interacting pair — resolve those too
+        # so "load full graph" enriches them the same way.
+        for drug_label in row.get("all_drugs") or []:
+            if drug_label not in ids:
+                resolved = match_own(own_drugs, drug_label)
+                if resolved:
+                    ids[drug_label] = resolved
+        for variant_label in row.get("all_variants") or []:
+            if variant_label not in ids:
+                resolved = match_own(own_variants, variant_label)
+                if resolved:
+                    ids[variant_label] = resolved
+    elif category == "fig6":
+        # No EVI here — the variant id IS already a real graph id (unlike
+        # every other category's pseudo-id-as-label nodes), so it resolves
+        # itself; only the gene label needs resolving, via the variant's
+        # own VAR-GEN edge.
+        ids[row["variant"]] = row["variant"]
+        gene_id = resolve_neighbor_by_label(G, row["variant"], row["gene"])
+        if gene_id:
+            ids[row["gene"]] = gene_id
 
     return ids
 
@@ -222,9 +364,13 @@ def attach_graph_attrs(nodes: list, edges: list, G, id_map: dict) -> None:
     `data` dict wherever a real node id is known (via id_map), so
     st-link-analysis's built-in info panel shows everything on click —
     it renders whatever is in `data` verbatim. id/label/name (and, for
-    edges, source/target) are left alone so the on-canvas caption and
-    the graph's wiring don't change; the real attributes may include
-    their own "name"-like fields under different keys."""
+    edges, source/target/relation) are left alone so the on-canvas
+    caption and the graph's wiring don't change — "relation" specifically
+    stays protected because a few figures deliberately set it to a
+    cosmetic/abbreviated value (e.g. Figure 5's "SYN_INT", Figure 4's
+    "CIViC"/"OptimusKG only") rather than the real edge attribute's own
+    value; the real attributes may include their own "name"/"relation"-
+    like fields under different keys, still fully visible on click."""
     for node in nodes:
         real_id = id_map.get(node["data"]["id"])
         if not real_id or real_id not in G:
@@ -245,15 +391,56 @@ def attach_graph_attrs(nodes: list, edges: list, G, id_map: dict) -> None:
                 d[key] = safe_attr(value)
 
 
+TITLE_CASE_NODE_TYPES = {"DRG", "DIS"}
+
+
+def display_name(node_id: str, node_type: str) -> str:
+    """Drug/disease labels come out of paper_node_label() however
+    OptimusKG's own symbol/name field happens to be cased (often all
+    caps for drugs) — title-case them for display. id/matching logic
+    elsewhere always uses the untouched node_id, never this."""
+    return node_id.title() if node_type in TITLE_CASE_NODE_TYPES else node_id
+
+
 def make_node(node_id: str, node_type: str) -> dict:
-    return {"data": {"id": node_id, "label": node_type, "name": node_id}}
+    return {"data": {"id": node_id, "label": node_type, "name": display_name(node_id, node_type)}}
 
 
-def make_edge(edge_id: str, source: str, target: str, kind: str, relation: str | None = None) -> dict:
+def normalize_relation_text(text: str) -> str:
+    """Every edge's displayed relation, uppercased with spaces turned
+    into underscores (e.g. "interacts with" -> "INTERACTS_WITH") for a
+    single consistent style across all figures. Applied centrally here
+    rather than at each call site so no edge can slip through
+    un-normalized."""
+    return text.upper().replace(" ", "_")
+
+
+def make_edge(
+    edge_id: str, source: str, target: str, kind: str, relation: str | None = None
+) -> dict:
     data = {"id": edge_id, "label": kind, "source": source, "target": target}
     if relation:
-        data["relation"] = relation
+        data["relation"] = normalize_relation_text(relation)
     return {"data": data}
+
+
+def add_variant_context(
+    nodes: list, edges: list, evi: str, variants: list | None, seen: set
+) -> None:
+    """Gray CONTEXT nodes for every variant the EVI resolves to — variants
+    are supporting molecular context in these figures, not the
+    highlighted story, so they're styled like get_context_entities()'s
+    other gray nodes rather than colored by their own VAR type.
+    `seen` is shared with the caller's own node-id set so a variant that
+    happens to share a label with an already-added node is skipped."""
+    for i, variant in enumerate(variants or []):
+        if variant in seen:
+            continue
+        seen.add(variant)
+        nodes.append(
+            {"data": {"id": variant, "label": "CONTEXT", "name": variant, "node_type": "VAR"}}
+        )
+        edges.append(make_edge(f"e-var-{i}", evi, variant, "CONTEXT"))
 
 
 def build_fig1_hit(row: dict) -> tuple[list, list]:
@@ -264,26 +451,38 @@ def build_fig1_hit(row: dict) -> tuple[list, list]:
         make_edge("e1", evi, drug, "CONTEXT"),
         make_edge("e2", drug, gene, "HIGHLIGHT", row["relation"]),
     ]
+    add_variant_context(nodes, edges, evi, row.get("all_variants"), {gene, drug})
     return nodes, edges
 
 
 def build_fig1_miss(row: dict) -> tuple[list, list]:
     evi, gene, drug, bridge = row["evi"], row["gene"], row["drug"], row["bridge_gene"]
-    nodes = [make_node(evi, "EVI"), make_node(gene, "GEN"), make_node(drug, "DRG"), make_node(bridge, "GEN")]
+    nodes = [
+        make_node(evi, "EVI"),
+        make_node(gene, "GEN"),
+        make_node(drug, "DRG"),
+        make_node(bridge, "GEN"),
+    ]
     edges = [
         make_edge("e0", evi, gene, "CONTEXT"),
         make_edge("e1", evi, drug, "CONTEXT"),
         make_edge("e2", gene, bridge, "HIGHLIGHT", "interacts with"),
         make_edge("e3", drug, bridge, "HIGHLIGHT", row["bridge_relation"]),
     ]
+    add_variant_context(nodes, edges, evi, row.get("all_variants"), {gene, drug, bridge})
     return nodes, edges
 
 
 def build_fig2(row: dict) -> tuple[list, list]:
     evi, drug, contra = row["evi"], row["drug"], row["contraindications"]
-    nodes = [make_node(evi, "EVI"), make_node(drug, "DRG")] + [make_node(p, "PHE") for p in contra]
+    nodes = [make_node(evi, "EVI"), make_node(drug, "DRG")] + [
+        make_node(p, "PHE") for p in contra
+    ]
     edges = [make_edge("e0", evi, drug, "CONTEXT")]
-    edges += [make_edge(f"e{i + 1}", drug, p, "HIGHLIGHT", "CONTRAINDICATION") for i, p in enumerate(contra)]
+    edges += [
+        make_edge(f"e{i + 1}", drug, p, "HIGHLIGHT", "CONTRAINDICATION")
+        for i, p in enumerate(contra)
+    ]
     return nodes, edges
 
 
@@ -296,19 +495,29 @@ def build_fig3(row: dict) -> tuple[list, list]:
     nodes = [make_node(evi, "EVI")] + [make_node(d, "DIS") for d in chain]
     edges = [make_edge("e0", evi, chain[0], "CONTEXT")]
     edges += [
-        make_edge(f"e{i + 1}", chain[i], chain[i + 1], "CHAIN", "PARENT") for i in range(len(chain) - 1)
+        make_edge(f"e{i + 1}", chain[i], chain[i + 1], "CHAIN", "PARENT")
+        for i in range(len(chain) - 1)
     ]
     return nodes, edges
 
 
 def build_fig4(row: dict) -> tuple[list, list]:
-    evi, gene, civic_dis, gap_dis = row["evi"], row["gene"], row["civic_disease"], row["optimuskg_only_disease"]
-    nodes = [make_node(evi, "EVI"), make_node(gene, "GEN"), make_node(civic_dis, "DIS"), make_node(gap_dis, "DIS")]
+    evi, gene, civic_dis = row["evi"], row["gene"], row["civic_disease"]
+    nodes = [make_node(evi, "EVI"), make_node(gene, "GEN"), make_node(civic_dis, "DIS")]
     edges = [
         make_edge("e0", evi, gene, "CONTEXT"),
-        make_edge("e1", gene, civic_dis, "HIGHLIGHT", "civic"),
-        make_edge("e2", gene, gap_dis, "HIGHLIGHT", "optimuskg only"),
+        make_edge("e1", gene, civic_dis, "HIGHLIGHT", "CIViC"),
     ]
+    # optimuskg_only_diseases is already the diversity-preferring top-10
+    # selected server-side (see find_figure_candidates.py) — every one of
+    # them is a highlighted "structural gap" sibling of civic_dis, not a
+    # single example, so they're all first-class HIGHLIGHT nodes rather
+    # than gray context.
+    for i, gap_dis in enumerate(row.get("optimuskg_only_diseases") or []):
+        if gap_dis == civic_dis:
+            continue
+        nodes.append(make_node(gap_dis, "DIS"))
+        edges.append(make_edge(f"e-gap-{i}", gene, gap_dis, "HIGHLIGHT", "OptimusKG only"))
     return nodes, edges
 
 
@@ -318,8 +527,50 @@ def build_fig5(row: dict) -> tuple[list, list]:
     edges = [
         make_edge("e0", evi, d1, "CONTEXT"),
         make_edge("e1", evi, d2, "CONTEXT"),
-        make_edge("e2", d1, d2, "HIGHLIGHT", "SYNERGISTIC_INTERACTION"),
+        make_edge("e2", d1, d2, "HIGHLIGHT", "SYN_INT"),  # SYNERGISTIC_INTERACTION, abbreviated for on-canvas readability
     ]
+    # all_drugs/all_variants are every drug/variant the EVI itself resolves
+    # to (not just the interacting pair highlighted above) — shown as plain
+    # CONTEXT nodes so the figure reflects the full regimen/molecular
+    # context an evidence item actually represents.
+    seen = {d1, d2}
+    for i, drug in enumerate(row.get("all_drugs") or []):
+        if drug in seen:
+            continue
+        seen.add(drug)
+        nodes.append(make_node(drug, "DRG"))
+        edges.append(make_edge(f"e-drug-{i}", evi, drug, "CONTEXT"))
+    add_variant_context(nodes, edges, evi, row.get("all_variants"), seen)
+    return nodes, edges
+
+
+def build_fig6(row: dict) -> tuple[list, list]:
+    # No EVI to anchor on — the whole point is the absence of a matching
+    # one. Just the variant and its gene, with the gap verdict itself
+    # (which track, which classification) carried on the edge.
+    variant, gene = row["variant"], row["gene"]
+    # Unlike every other figure's variant entries (already pre-formatted
+    # as "p.Val600Glu"-style labels by find_figure_candidates.py's
+    # label()), fig6's "variant" field is deliberately the real graph id
+    # (needed to anchor context/attribute resolution — see module
+    # docstring), so its display name needs the same HGVS protein-change
+    # extraction applied here instead, from the row's own hgvs_name.
+    variant_name = paper_node_label(
+        variant, {"node_type": "VAR", "hgvs_name": row.get("hgvs_name")}
+    )
+    nodes = [
+        {"data": {"id": variant, "label": "VAR", "name": variant_name}},
+        make_node(gene, "GEN"),
+    ]
+    # Caption kept short (just the track, e.g. "PREDISPOSING_GAP" after
+    # normalize_relation_text) — the classification value and the "why
+    # it's a gap" explanation still ride along as separate data fields,
+    # visible in the click-to-inspect panel rather than crowding the
+    # on-canvas edge label.
+    gap_edge = make_edge("e0", variant, gene, "HIGHLIGHT", f"{row['track']}_gap")
+    gap_edge["data"]["classification"] = row["classification"]
+    gap_edge["data"]["gap_reason"] = "no matching CIViC evidence item for this classification"
+    edges = [gap_edge]
     return nodes, edges
 
 
@@ -331,6 +582,7 @@ BUILDERS = {
     "fig4": build_fig4,
     "fig5_combination": build_fig5,
     "fig5_substitutes": build_fig5,
+    "fig6": build_fig6,
 }
 
 
@@ -338,15 +590,23 @@ def row_summary(category: str, row: dict) -> str:
     if category in ("fig1_hit",):
         return f"{row['evi']}: {row['gene']} / {row['drug']} — {row['relation']}"
     if category == "fig1_miss":
-        return f"{row['evi']}: {row['gene']} / {row['drug']} — bridge {row['bridge_gene']}"
+        return (
+            f"{row['evi']}: {row['gene']} / {row['drug']} — bridge {row['bridge_gene']}"
+        )
     if category == "fig2":
         return f"{row['evi']}: {row['drug']} — {len(row['contraindications'])} contraindications"
     if category == "fig3":
         return f"{row['evi']}: " + " -> ".join(row["chain"])
     if category == "fig4":
-        return f"{row['evi']}: {row['gene']} — civic: {row['civic_disease']}, gap: {row['optimuskg_only_disease']}"
+        n_total = row.get("optimuskg_only_diseases_total", len(row.get("optimuskg_only_diseases") or []))
+        return (
+            f"{row['evi']}: {row['gene']} — civic: {row['civic_disease']}, "
+            f"gap: {n_total} optimuskg-only diseases"
+        )
     if category in ("fig5_combination", "fig5_substitutes"):
         return f"{row['evi']}: {row['drug_1']} + {row['drug_2']}"
+    if category == "fig6":
+        return f"{row['variant']} ({row['gene']}): {row['track']} = {row['classification']}"
     return row.get("evi", str(row))
 
 
@@ -367,18 +627,31 @@ with col1:
         "Figure type", available, format_func=lambda c: CATEGORY_LABELS[c]
     )
     section = report[category]
+    # Prefer a diversified view when the search provides one (fig6: one
+    # candidate per gene, since ranking by raw count alone is dominated by
+    # a single outlier gene — see find_figure_candidates.py).
+    rows = section.get("top_by_gene", section["top"])
+
     total_key = next((k for k in section if k.startswith("total")), None)
     if total_key:
-        st.caption(f"{section[total_key]} total candidates — showing top {len(section['top'])}")
-
-    rows = section["top"]
+        caption = f"{section[total_key]} total candidates"
+        if "total_distinct_genes" in section:
+            caption += f" ({section['total_distinct_genes']} distinct genes)"
+        caption += f" — showing top {len(rows)}"
+        if "top_by_gene" in section:
+            caption += " (one per gene)"
+        st.caption(caption)
     row_idx = st.selectbox(
-        "Candidate", range(len(rows)), format_func=lambda i: row_summary(category, rows[i])
+        "Candidate",
+        range(len(rows)),
+        format_func=lambda i: row_summary(category, rows[i]),
     )
     selected_row = rows[row_idx]
     st.json(selected_row, expanded=False)
 
-    layout = st.selectbox("Layout", ["cose", "breadthfirst", "circle", "concentric", "grid"], index=0)
+    layout = st.selectbox(
+        "Layout", ["cose", "breadthfirst", "circle", "concentric", "grid"], index=0
+    )
 
     show_context = st.checkbox(
         "Load full graph — adds other resolved entities (gray) and full "
@@ -388,49 +661,124 @@ with col1:
 
 with col2:
     nodes, edges = BUILDERS[category](selected_row)
-    evi_id = selected_row["evi"]
+    # Every other category anchors on its EVI (already a real graph id);
+    # fig6 has no EVI — the variant plays the same role (also already a
+    # real graph id) as the thing context nodes would radiate from.
+    anchor_id = selected_row["variant"] if category == "fig6" else selected_row["evi"]
 
     context_truncated = 0
     context_entities: list = []
+    fig6_no_matching_coverage = False
     if show_context:
         G = load_graph()
-        evi_attrs = G.nodes[evi_id] if evi_id in G else {}
-        already_labels = {n["data"]["id"] for n in nodes}
-        context_entities, context_truncated = get_context_entities(G, evi_id, already_labels)
+        id_map = {anchor_id: anchor_id}
 
-        id_map = {evi_id: evi_id, **resolve_row_ids(G, category, selected_row, evi_attrs)}
-        for label, node_type, real_id in context_entities:
-            nodes.append({"data": {"id": label, "label": "CONTEXT", "name": label, "node_type": node_type}})
-            edges.append(make_edge(f"ctx-{label}", evi_id, label, "CONTEXT"))
-            id_map[label] = real_id
+        if category == "fig6":
+            id_map.update(resolve_row_ids(G, category, selected_row, {}))
+            gene_id = id_map.get(selected_row["gene"])
+            if gene_id:
+                already_labels = {n["data"]["id"] for n in nodes}
+                fig6_ctx = get_fig6_context(
+                    G, gene_id, anchor_id, selected_row["track"], already_labels
+                )
+                fig6_no_matching_coverage = not fig6_ctx["other_variants"][0]
+                # Context edges must reference each node's Cytoscape id —
+                # the gene's canvas id is its display label (selected_row
+                # ["gene"]), NOT gene_id (the resolved real graph id, only
+                # needed above as a traversal starting point).
+                for ctx_key, ctx_anchor in (
+                    ("other_variants", selected_row["gene"]),
+                    ("diseases", anchor_id),
+                ):
+                    entities, truncated = fig6_ctx[ctx_key]
+                    context_truncated += truncated
+                    for label, node_type, real_id in entities:
+                        nodes.append(
+                            {
+                                "data": {
+                                    "id": label,
+                                    "label": "CONTEXT",
+                                    "name": display_name(label, node_type),
+                                    "node_type": node_type,
+                                }
+                            }
+                        )
+                        edges.append(
+                            make_edge(f"ctx-{ctx_key}-{label}", ctx_anchor, label, "CONTEXT")
+                        )
+                        id_map[label] = real_id
+                        context_entities.append((label, node_type, real_id))
+        else:
+            anchor_attrs = G.nodes[anchor_id] if anchor_id in G else {}
+            already_labels = {n["data"]["id"] for n in nodes}
+            context_entities, context_truncated = get_context_entities(
+                G, anchor_id, already_labels
+            )
+            id_map.update(resolve_row_ids(G, category, selected_row, anchor_attrs))
+            for label, node_type, real_id in context_entities:
+                nodes.append(
+                    {
+                        "data": {
+                            "id": label,
+                            "label": "CONTEXT",
+                            "name": display_name(label, node_type),
+                            "node_type": node_type,
+                        }
+                    }
+                )
+                edges.append(make_edge(f"ctx-{label}", anchor_id, label, "CONTEXT"))
+                id_map[label] = real_id
 
         attach_graph_attrs(nodes, edges, G, id_map)
 
     elements = {"nodes": nodes, "edges": edges}
 
-    types_present = sorted({n["data"]["label"] for n in nodes if n["data"]["label"] != "CONTEXT"})
+    types_present = sorted(
+        {n["data"]["label"] for n in nodes if n["data"]["label"] != "CONTEXT"}
+    )
     node_styles = [
-        NodeStyle(t, NODE_COLORS.get(t, "#828C97"), caption="name") for t in types_present
+        NodeStyle(t, NODE_COLORS.get(t, "#828C97"), caption="name")
+        for t in types_present
     ]
     if any(n["data"]["label"] == "CONTEXT" for n in nodes):
         node_styles.append(NodeStyle("CONTEXT", CONTEXT_COLOR, caption="name"))
     edge_styles = [
         EdgeStyle("CONTEXT", color=CONTEXT_COLOR, directed=False),
-        EdgeStyle("HIGHLIGHT", color=HIGHLIGHT_COLOR, caption="relation", directed=True),
-        EdgeStyle("CHAIN", color=HIGHLIGHT_COLOR, caption="relation", directed=False),
+        WhiteLabelEdgeStyle(
+            "HIGHLIGHT", color=HIGHLIGHT_COLOR, caption="relation", directed=True
+        ),
+        WhiteLabelEdgeStyle(
+            "CHAIN", color=HIGHLIGHT_COLOR, caption="relation", directed=False
+        ),
     ]
 
     st_link_analysis(
-        elements, layout=layout, node_styles=node_styles, edge_styles=edge_styles, height=650,
+        elements,
+        layout=layout,
+        node_styles=node_styles,
+        edge_styles=edge_styles,
+        height=650,
         key=f"{category}-{row_idx}-{show_context}",
     )
     st.caption(
         "Click a node or edge to open its attribute panel."
-        + ("" if show_context else " Enable \"load full graph\" above for the full attribute record.")
+        + (
+            ""
+            if show_context
+            else ' Enable "load full graph" above for the full attribute record.'
+        )
     )
     legend = "  ".join(f"🔵 {NODE_TYPE_LABELS.get(t, t)}" for t in types_present)
     if show_context and context_entities:
         legend += "  ⚪ other resolved entity (context)"
     st.caption(legend)
     if context_truncated:
-        st.caption(f"+{context_truncated} more directly connected entities not shown (capped at {MAX_CONTEXT_NODES})")
+        st.caption(
+            f"+{context_truncated} more directly connected entities not shown (capped at {MAX_CONTEXT_NODES})"
+        )
+    if fig6_no_matching_coverage:
+        st.caption(
+            "No other variants on this gene have matching-type CIViC coverage for "
+            f"the {selected_row['track']} track — true type-matched coverage is rare "
+            "(see graph_statistics.py's clinvar_gap_coverage)."
+        )
