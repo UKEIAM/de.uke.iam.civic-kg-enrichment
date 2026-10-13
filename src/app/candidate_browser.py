@@ -2,8 +2,7 @@
 """
 Lightweight Streamlit browser for find_figure_candidates.py's output —
 pick a figure type, pick one of its top-N candidate evidence items, see it
-rendered as a small interactive graph (st-link-analysis, a Cytoscape.js
-component) instead of reading the raw JSON.
+rendered as a small interactive graph (st-link-analysis).
 
 Reads only the candidates JSON, not the graph pickle — the candidate rows
 already carry short display labels (e.g. "BRAF", not the ENSG node id), so
@@ -79,6 +78,17 @@ CONTEXT_COLOR = "#B0B0B0"
 HIGHLIGHT_COLOR = "#DC267F"
 MAX_CONTEXT_NODES = 12
 EDGE_LABEL_TEXT_COLOR = "#FFFFFF"
+# Cytoscape.js's own default node label font-size is 16px (confirmed in
+# the bundled build); bumped up for publication-figure legibility.
+NODE_FONT_SIZE = "18px"
+# text-wrap requires text-max-width to actually trigger wrapping; its
+# wrap algorithm only ever breaks at word boundaries (never mid-word —
+# a single word wider than this just overflows its line rather than
+# being split), so this is just where multi-word labels start wrapping.
+NODE_LABEL_WRAP_WIDTH = "100px"
+# EdgeStyle/WhiteLabelEdgeStyle don't expose font-size either — edge
+# captions (relation text) default to the same tiny 16px otherwise.
+EDGE_FONT_SIZE = "14px"
 
 
 class WhiteLabelEdgeStyle(EdgeStyle):
@@ -92,6 +102,24 @@ class WhiteLabelEdgeStyle(EdgeStyle):
         style = super().dump()
         style["style"]["color"] = EDGE_LABEL_TEXT_COLOR
         return style
+
+
+class RawStyle:
+    """A literal Cytoscape.js style rule for any selector — node or edge
+    — bypassing NodeStyle/EdgeStyle's own label-based selector
+    (node[label='...']/edge[label='...']) wherever a property they
+    don't expose is needed (e.g. node font-size/text-wrap, or
+    edge[label='<kind>'][undirected = "True"] for the bidirectional
+    -arrow fix — see its call sites for each one's own reasoning)."""
+
+    def __init__(self, selector: str, style: dict) -> None:
+        self.selector = selector
+        self.style = style
+
+    def dump(self) -> dict:
+        return {"selector": self.selector, "style": self.style}
+
+
 MAX_ATTR_LEN = 500
 RESERVED_NODE_KEYS = {"id", "label", "name"}
 RESERVED_EDGE_KEYS = {"id", "label", "source", "target", "relation"}
@@ -175,7 +203,11 @@ def _neighbors_by_edge_type(G, anchor_id: str, edge_type: str) -> set:
 
 
 def get_fig6_context(
-    G, gene_id: str, variant_id: str, track: str, exclude_labels: set,
+    G,
+    gene_id: str,
+    variant_id: str,
+    track: str,
+    exclude_labels: set,
     cap: int = MAX_CONTEXT_NODES,
 ) -> dict:
     """Figure 6 has no EVI to pull "other resolved entities" from (see
@@ -203,7 +235,9 @@ def get_fig6_context(
     get_context_entities()."""
     seen = set(exclude_labels)
 
-    def collect(anchor_id: str, edge_type: str, require_track_covered: bool = False) -> tuple[list, int]:
+    def collect(
+        anchor_id: str, edge_type: str, require_track_covered: bool = False
+    ) -> tuple[list, int]:
         entities = []
         for node_id in _neighbors_by_edge_type(G, anchor_id, edge_type):
             if node_id == variant_id or node_id not in G:
@@ -364,13 +398,27 @@ def attach_graph_attrs(nodes: list, edges: list, G, id_map: dict) -> None:
     `data` dict wherever a real node id is known (via id_map), so
     st-link-analysis's built-in info panel shows everything on click —
     it renders whatever is in `data` verbatim. id/label/name (and, for
-    edges, source/target/relation) are left alone so the on-canvas
-    caption and the graph's wiring don't change — "relation" specifically
-    stays protected because a few figures deliberately set it to a
-    cosmetic/abbreviated value (e.g. Figure 4's "SYN_INT", Figure 5's
-    "CIViC"/"OptimusKG only") rather than the real edge attribute's own
-    value; the real attributes may include their own "name"/"relation"-
-    like fields under different keys, still fully visible on click."""
+    edges, relation) are left alone so the on-canvas caption doesn't
+    change — "relation" specifically stays protected because a few
+    figures deliberately set it to a cosmetic/abbreviated or derived
+    value (e.g. Figure 4's "SYN_INT", Figure 5's "CIVIC_ONLY"/
+    "OPTIMUSKG_CIVIC") rather than the real edge attribute's own
+    value; the real attributes may
+    include their own "name"/"relation"-like fields under different
+    keys, still fully visible on click.
+
+    source/target ARE corrected (swapped) when the real graph edge only
+    matched in the reverse direction — some figures build an edge in
+    whichever order reads naturally for the figure's story (e.g. Figure
+    3's chain direction isn't knowable from the JSON alone — see
+    build_fig3), which can disagree with the real edge's own (u, v)
+    order. Swapping here means a genuinely directional edge's single
+    arrow (the CHAIN undirected=False style rule) always points the
+    correct way once the real direction is known, rather than asserting
+    whichever direction the figure happened to construct it in. A no-op
+    for every edge kind that already points the real way, and visually
+    invisible for undirected=True edges (styled with arrows on both
+    ends regardless)."""
     for node in nodes:
         real_id = id_map.get(node["data"]["id"])
         if not real_id or real_id not in G:
@@ -383,9 +431,12 @@ def attach_graph_attrs(nodes: list, edges: list, G, id_map: dict) -> None:
         u, v = id_map.get(d["source"]), id_map.get(d["target"])
         if not (u and v):
             continue
-        edge_data = G.get_edge_data(u, v) or G.get_edge_data(v, u)
+        forward_data = G.get_edge_data(u, v)
+        edge_data = forward_data or G.get_edge_data(v, u)
         if not edge_data:
             continue
+        if not forward_data:
+            d["source"], d["target"] = d["target"], d["source"]
         for key, value in edge_data.items():
             if key not in RESERVED_EDGE_KEYS:
                 d[key] = safe_attr(value)
@@ -403,7 +454,13 @@ def display_name(node_id: str, node_type: str) -> str:
 
 
 def make_node(node_id: str, node_type: str) -> dict:
-    return {"data": {"id": node_id, "label": node_type, "name": display_name(node_id, node_type)}}
+    return {
+        "data": {
+            "id": node_id,
+            "label": node_type,
+            "name": display_name(node_id, node_type),
+        }
+    }
 
 
 def normalize_relation_text(text: str) -> str:
@@ -438,7 +495,14 @@ def add_variant_context(
             continue
         seen.add(variant)
         nodes.append(
-            {"data": {"id": variant, "label": "CONTEXT", "name": variant, "node_type": "VAR"}}
+            {
+                "data": {
+                    "id": variant,
+                    "label": "CONTEXT",
+                    "name": variant,
+                    "node_type": "VAR",
+                }
+            }
         )
         edges.append(make_edge(f"e-var-{i}", evi, variant, "CONTEXT"))
 
@@ -469,7 +533,9 @@ def build_fig1_miss(row: dict) -> tuple[list, list]:
         make_edge("e2", gene, bridge, "HIGHLIGHT", "interacts with"),
         make_edge("e3", drug, bridge, "HIGHLIGHT", row["bridge_relation"]),
     ]
-    add_variant_context(nodes, edges, evi, row.get("all_variants"), {gene, drug, bridge})
+    add_variant_context(
+        nodes, edges, evi, row.get("all_variants"), {gene, drug, bridge}
+    )
     return nodes, edges
 
 
@@ -507,7 +573,9 @@ def build_fig4(row: dict) -> tuple[list, list]:
     edges = [
         make_edge("e0", evi, d1, "CONTEXT"),
         make_edge("e1", evi, d2, "CONTEXT"),
-        make_edge("e2", d1, d2, "HIGHLIGHT", "SYN_INT"),  # SYNERGISTIC_INTERACTION, abbreviated for on-canvas readability
+        make_edge(
+            "e2", d1, d2, "HIGHLIGHT", "SYN_INT"
+        ),  # SYNERGISTIC_INTERACTION, abbreviated for on-canvas readability
     ]
     # all_drugs/all_variants are every drug/variant the EVI itself resolves
     # to (not just the interacting pair highlighted above) — shown as plain
@@ -524,12 +592,40 @@ def build_fig4(row: dict) -> tuple[list, list]:
     return nodes, edges
 
 
+def civic_disease_edge_label(origin: list | None) -> str:
+    """CIVIC_ONLY if this gene-disease association has never been
+    independently corroborated by OptimusKG, OPTIMUSKG_CIVIC if it has
+    — derived from the real GEN-DIS edge's own origin value (see
+    find_figure_candidates.py's civic_disease_origin()), not a flat
+    hardcoded label. Checks "civic" in origin specifically, not just
+    "optimuskg" in origin — the rare disease_resolved_via=
+    mondo_parent_fallback case (CIViC's exact MONDO term isn't an
+    OptimusKG node, so disease_node_id is an ANCESTOR term instead) can
+    land on a GEN-DIS edge tagged origin=["optimuskg"] only, with no
+    "civic" at all, since the "civic" tag lives on the edge to the more
+    specific, pre-fallback term instead — checking "optimuskg in origin"
+    alone would wrongly call that OPTIMUSKG_CIVIC. origin is None/
+    missing "civic" entirely defaults to CIVIC_ONLY either way, since
+    this edge's own gene-disease pair is always CIViC-asserted by
+    construction (see find_figure_candidates.py's fig5_candidates) even
+    when the graph's own edge-level provenance tag doesn't reflect it."""
+    if origin and "civic" in origin and "optimuskg" in origin:
+        return "OPTIMUSKG_CIVIC"
+    return "CIVIC_ONLY"
+
+
 def build_fig5(row: dict) -> tuple[list, list]:
     evi, gene, civic_dis = row["evi"], row["gene"], row["civic_disease"]
     nodes = [make_node(evi, "EVI"), make_node(gene, "GEN"), make_node(civic_dis, "DIS")]
     edges = [
         make_edge("e0", evi, gene, "CONTEXT"),
-        make_edge("e1", gene, civic_dis, "HIGHLIGHT", "CIViC"),
+        make_edge(
+            "e1",
+            gene,
+            civic_dis,
+            "HIGHLIGHT",
+            civic_disease_edge_label(row.get("civic_disease_origin")),
+        ),
     ]
     # optimuskg_only_diseases is already the diversity-preferring top-10
     # selected server-side (see find_figure_candidates.py) — every one of
@@ -540,7 +636,9 @@ def build_fig5(row: dict) -> tuple[list, list]:
         if gap_dis == civic_dis:
             continue
         nodes.append(make_node(gap_dis, "DIS"))
-        edges.append(make_edge(f"e-gap-{i}", gene, gap_dis, "HIGHLIGHT", "OptimusKG only"))
+        edges.append(
+            make_edge(f"e-gap-{i}", gene, gap_dis, "HIGHLIGHT", "OptimusKG only")
+        )
     return nodes, edges
 
 
@@ -569,7 +667,9 @@ def build_fig6(row: dict) -> tuple[list, list]:
     # on-canvas edge label.
     gap_edge = make_edge("e0", variant, gene, "HIGHLIGHT", f"{row['track']}_gap")
     gap_edge["data"]["classification"] = row["classification"]
-    gap_edge["data"]["gap_reason"] = "no matching CIViC evidence item for this classification"
+    gap_edge["data"]["gap_reason"] = (
+        "no matching CIViC evidence item for this classification"
+    )
     edges = [gap_edge]
     return nodes, edges
 
@@ -600,7 +700,10 @@ def row_summary(category: str, row: dict) -> str:
     if category in ("fig4_combination", "fig4_substitutes"):
         return f"{row['evi']}: {row['drug_1']} + {row['drug_2']}"
     if category == "fig5":
-        n_total = row.get("optimuskg_only_diseases_total", len(row.get("optimuskg_only_diseases") or []))
+        n_total = row.get(
+            "optimuskg_only_diseases_total",
+            len(row.get("optimuskg_only_diseases") or []),
+        )
         return (
             f"{row['evi']}: {row['gene']} — civic: {row['civic_disease']}, "
             f"gap: {n_total} optimuskg-only diseases"
@@ -704,7 +807,9 @@ with col2:
                             }
                         )
                         edges.append(
-                            make_edge(f"ctx-{ctx_key}-{label}", ctx_anchor, label, "CONTEXT")
+                            make_edge(
+                                f"ctx-{ctx_key}-{label}", ctx_anchor, label, "CONTEXT"
+                            )
                         )
                         id_map[label] = real_id
                         context_entities.append((label, node_type, real_id))
@@ -737,11 +842,40 @@ with col2:
         {n["data"]["label"] for n in nodes if n["data"]["label"] != "CONTEXT"}
     )
     node_styles = [
-        NodeStyle(t, NODE_COLORS.get(t, "#828C97"), caption="name")
+        # EVI styled gray like CONTEXT nodes (not its own NODE_COLORS
+        # entry) — every figure's EVI is scaffolding for the story being
+        # told, not itself part of the highlighted finding. Overridden
+        # here rather than in graph_viz.py's shared NODE_COLORS, since
+        # the exploratory scripts' own static figures still want EVI in
+        # its own distinct color.
+        NodeStyle(
+            t,
+            CONTEXT_COLOR if t == "EVI" else NODE_COLORS.get(t, "#828C97"),
+            caption="name",
+        )
         for t in types_present
     ]
+    node_kinds_present = list(types_present)
     if any(n["data"]["label"] == "CONTEXT" for n in nodes):
         node_styles.append(NodeStyle("CONTEXT", CONTEXT_COLOR, caption="name"))
+        node_kinds_present.append("CONTEXT")
+    # A bare "node" selector here was silently losing to the component's
+    # own built-in base stylesheet (same issue as edges below — its
+    # bundled JS ships its own default node font-size via the exact same
+    # bare "node" selector) — label-specific selectors, matching
+    # NodeStyle's own node[label='...'] pattern above, apply correctly
+    # instead.
+    for kind in node_kinds_present:
+        node_styles.append(
+            RawStyle(
+                f'node[label="{kind}"]',
+                {
+                    "font-size": NODE_FONT_SIZE,
+                    "text-wrap": "wrap",
+                    "text-max-width": NODE_LABEL_WRAP_WIDTH,
+                },
+            )
+        )
     edge_styles = [
         EdgeStyle("CONTEXT", color=CONTEXT_COLOR, directed=False),
         WhiteLabelEdgeStyle(
@@ -751,6 +885,52 @@ with col2:
             "CHAIN", color=HIGHLIGHT_COLOR, caption="relation", directed=False
         ),
     ]
+    # A bare "edge" selector here was silently losing to the component's
+    # own built-in base stylesheet (bundled JS ships its own default
+    # edge font-size via the exact same bare "edge" selector) — label
+    # -specific selectors, matching the pattern CONTEXT/HIGHLIGHT/CHAIN
+    # already use above (and the undirected-arrow fix below, which does
+    # visibly work), apply correctly instead.
+    for kind in ("CONTEXT", "HIGHLIGHT", "CHAIN"):
+        edge_styles.append(
+            RawStyle(f'edge[label="{kind}"]', {"font-size": EDGE_FONT_SIZE})
+        )
+    # Overrides each kind's own arrow above wherever the real edge data
+    # says undirected=True (only present at all when "load full graph" is
+    # on) — both arrowheads instead of whatever single direction the
+    # edge's CONTEXT/HIGHLIGHT/CHAIN kind alone would otherwise draw. One
+    # rule per kind (not a single global one) so each arrow's color still
+    # matches that kind's own line color.
+    for kind, color in (
+        ("CONTEXT", CONTEXT_COLOR),
+        ("HIGHLIGHT", HIGHLIGHT_COLOR),
+        ("CHAIN", HIGHLIGHT_COLOR),
+    ):
+        edge_styles.append(
+            RawStyle(
+                f'edge[label="{kind}"][undirected = "True"]',
+                {
+                    "source-arrow-shape": "triangle",
+                    "target-arrow-shape": "triangle",
+                    "source-arrow-color": color,
+                    "target-arrow-color": color,
+                },
+            )
+        )
+    # CHAIN's base style has no arrow at all (direction isn't knowable
+    # from the JSON alone — see build_fig3/module docstring), but once
+    # "load full graph" resolves the real DIS-DIS/PARENT edge (always
+    # undirected=False — genuinely directional), a single correctly
+    # -oriented arrow belongs here. attach_graph_attrs() has already
+    # swapped source/target so this edge's stored direction always
+    # matches the real one, so a plain target-arrow is always correct —
+    # never source-arrow, unlike the undirected=True rule above.
+    edge_styles.append(
+        RawStyle(
+            'edge[label="CHAIN"][undirected = "False"]',
+            {"target-arrow-shape": "triangle", "target-arrow-color": HIGHLIGHT_COLOR},
+        )
+    )
 
     st_link_analysis(
         elements,
