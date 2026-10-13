@@ -510,12 +510,26 @@ for eid, gene, own_dis, others in fig5_top:
         f"{', '.join(label(d) for d in top_others)}"
     )
 
+def civic_disease_origin(gene: str, own_dis: str) -> list | None:
+    """The real GEN-DIS edge's own origin value for (gene, own_dis) —
+    ["civic"] if this association has never been independently
+    corroborated by OptimusKG, or ["civic", "optimuskg"] (order as
+    stored) if OptimusKG also carries it natively. Used by
+    candidate_browser.py's build_fig5() to label this edge CIVIC_ONLY
+    vs. OPTIMUSKG_CIVIC instead of a flat hardcoded "CIViC"."""
+    return next(
+        (origin for dis, origin in gen_dis_origin.get(gene, []) if dis == own_dis),
+        None,
+    )
+
+
 report["fig5"] = {
     "total": len(fig5_candidates),
     "top": [
         {
             "evi": eid, "gene": label(gene),
             "civic_disease": label(own_dis),
+            "civic_disease_origin": civic_disease_origin(gene, own_dis),
             "optimuskg_only_diseases": [
                 label(d) for d in diverse_top_n(others, FIG5_TOP_DISEASES)
             ],
