@@ -50,9 +50,9 @@ in `src/graph/`, and used for a different purpose downstream:
 Three orchestration scripts in `scripts/`, run in order:
 
 ```bash
-./scripts/fetch_data.sh                    # CIViC, ClinVar, OptimusKG raw data
-./scripts/build_cancer_scoped_graph.sh     # alignment -> cancer_scoped_graph_<date>.pkl
-./scripts/build_expanded_evidence_graph.sh # evidence_backed_expanded_graph_<date>.pkl
+bash scripts/fetch_data.sh                    # CIViC, ClinVar, OptimusKG raw data
+bash scripts/build_cancer_scoped_graph.sh     # alignment -> cancer_scoped_graph_<date>.pkl
+bash scripts/build_expanded_evidence_graph.sh # evidence_backed_expanded_graph_<date>.pkl
 ```
 
 ## Exploring candidates with the Streamlit app
