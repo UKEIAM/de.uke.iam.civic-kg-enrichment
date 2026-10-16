@@ -50,22 +50,60 @@ in `src/graph/`, and used for a different purpose downstream:
 Three orchestration scripts in `scripts/`, run in order:
 
 ```bash
-./scripts/fetch_data.sh                    # CIViC, ClinVar, OptimusKG raw data
-./scripts/build_cancer_scoped_graph.sh     # alignment -> cancer_scoped_graph_<date>.pkl
-./scripts/build_expanded_evidence_graph.sh # evidence_backed_expanded_graph_<date>.pkl
+bash scripts/fetch_data.sh                    # CIViC, ClinVar, OptimusKG raw data
+bash scripts/build_cancer_scoped_graph.sh     # alignment -> cancer_scoped_graph_<date>.pkl
+bash scripts/build_expanded_evidence_graph.sh # evidence_backed_expanded_graph_<date>.pkl
 ```
+
+## Graph statistics (optional)
+
+```bash
+python src/analysis/graph_statistics.py
+```
+
+Computes the overall statistics of the cancer-scoped graph reported in the
+paper's Results section. It prints a report and saves it as
+`data/processed/graph_statistics/graph_statistics_<date>.json`. Covered:
+
+- **Basic counts**: nodes and edges, broken down by type.
+- **Entity resolution coverage**: how many CIViC evidence items resolve to
+  an OptimusKG disease, gene, and drug (drugs for PREDICTIVE items only),
+  including how each was resolved and why unresolved drugs failed.
+- **Variant resolution**: evidence items resolving to at least one ClinVar
+  variant node. This is reported separately from entity resolution because
+  variant resolution is scoped much more narrowly.
+- **ClinVar gap-detection coverage**: per classification track
+  (predisposing, oncogenic, clinical impact), how many qualifying variants
+  are covered by a CIViC evidence item of the matching type.
+- **CIViC-only edges**: GEN-DIS, VAR-DIS and VAR-DRG edges that come only
+  from CIViC, not from OptimusKG.
+- **Catalog and variant curation coverage**: the share of OptimusKG's
+  genes, diseases, drugs, and variant nodes that CIViC evidence touches.
+- **Disease hierarchy richness**: evidence items whose disease has at least
+  2 parent/child links in the disease hierarchy.
+- **Figure statistics**: the hit/miss rates behind the mechanism-of-action,
+  contraindication, and drug-interaction figures, restricted to PREDICTIVE
+  evidence items. These are population-level rates, unlike
+  `find_figure_candidates.py`, which picks individual examples.
+
+Requires the latest `data/graphs/cancer_scoped_graph_*.pkl`,
+`civic_resolved_*.csv` and `civic_predictive_unresolved_drugs_*.csv` in
+`data/processed/` (both from `civic_optimuskg_alignment.py`). Running
+`scripts/build_cancer_scoped_graph.sh` produces all three.
 
 ## Exploring candidates with the Streamlit app
 
 ```bash
+bash scripts/build_candidate_browser_data.sh  # find_figure_candidates_<date>.json
 streamlit run src/app/candidate_browser.py
 ```
 
 Opens at `http://localhost:8501`. Reads
-`data/processed/find_figure_candidates/find_figure_candidates_*.json` (from
-`python src/analysis/find_figure_candidates.py` (run this first if that
-file doesn't exist yet) and, only if the "load full graph" toggle is used,
-the latest `cancer_scoped_graph_*.pkl` as well.
+`data/processed/find_figure_candidates/find_figure_candidates_*.json`
+(built by `scripts/build_candidate_browser_data.sh`, which runs
+`src/analysis/find_figure_candidates.py` on the latest
+`cancer_scoped_graph_*.pkl`) and, only if the "load full graph" toggle is
+used, the latest `cancer_scoped_graph_*.pkl` as well.
 
 ## Loading into Neo4j
 

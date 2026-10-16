@@ -49,7 +49,7 @@ from load_files import find_latest_file
 NODES_DIR = Path("data/raw/optimuskg/nodes")
 CIVIC_RAW_PATH = find_latest_file(Path("data/raw/civic"), "civic_raw_*.csv")
 OUTPUT_DIR = Path("data/processed")
-os.makedirs(OUTPUT_DIR.parent, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # %%
 # ---------------------------------------------------------------------------
@@ -730,6 +730,7 @@ unresolved_drugs_predictive_df = unresolved_drugs_predictive_df.drop(
 # Save the resolved dataset to a timestamped CSV file
 date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 output_path = OUTPUT_DIR / f"civic_resolved_{date_str}.csv"
+
 civic_df.to_csv(output_path, index=False)
 print(f"\nSaved resolved dataset to {output_path}")
 

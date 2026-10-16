@@ -19,10 +19,10 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-if ! compgen -G "data/processed/evidence_graph_*.pkl" > /dev/null; then
-    echo "error: no data/processed/evidence_graph_*.pkl found." >&2
+if ! compgen -G "data/graphs/evidence_graph_*.pkl" > /dev/null; then
+    echo "error: no data/graphs/evidence_graph_*.pkl found." >&2
     echo "Run scripts/build_cancer_scoped_graph.sh (or just" >&2
-    echo "'python3 src/graph/build_evidence_graph.py') first." >&2
+    echo "'python3 src/graphs/build_evidence_graph.py') first." >&2
     exit 1
 fi
 
