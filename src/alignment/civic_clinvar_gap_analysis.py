@@ -67,7 +67,7 @@ CLINVAR_RAW_PATH = find_latest_file(
 )
 CIVIC_RESOLVED_PATH = find_latest_file(Path("data/processed"), "civic_resolved_*.csv")
 OUTPUT_DIR = Path("data/processed")
-os.makedirs(OUTPUT_DIR.parent, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
