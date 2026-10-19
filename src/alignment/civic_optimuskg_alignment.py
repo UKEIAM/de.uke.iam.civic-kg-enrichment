@@ -3,7 +3,7 @@
 Resolves CIViC evidence items' disease, gene/molecular profile and drug
 fields against OptimusKG nodes, scoped to a cancer-relevant subset (disease = cancer).
 
-Practical observations: OptimusKG's own precomputed hierarchy
+OptimusKG's own precomputed hierarchy
 convenience fields (`descendants`, `ancestors`, `parents`, `children`) are
 not reliable enough to trust directly. The cancer
 scope below is instead computed from the external MONDO ontology's own
@@ -244,7 +244,7 @@ def resolve_civic_disease_row(row: pd.Series) -> dict:
 # ---------------------------------------------------------------------------
 # 5. Gene resolution
 # - OptimusKG gene node primary ids are a mix of Ensembl (61,108 nodes) and NCBIGene (198
-#    nodes). Two independent, confirmed working paths:
+#    nodes). Two independent paths:
 #      1. hgnc_hub: CIViC Entrez id -> HGNC id (via HGNC's own complete set)
 #         -> OptimusKG gene node (via that node's own xrefs, source="HGNC")
 #      2. direct_ensembl: CIViC Entrez id -> Ensembl id (via the same HGNC
@@ -257,7 +257,7 @@ genes = pl.read_parquet(Path.joinpath(NODES_DIR, "gene.parquet"))
 genes_id_set = set(genes["id"].to_list())
 
 # OptimusKG's own HGNC -> gene node lookup, built from gene xrefs (struct
-# fields confirmed as {id, source}
+# fields are {id, source}
 gene_xrefs_flat = (
     genes.select([pl.col("id").alias("gene_node_id"), "xrefs"])
     .explode("xrefs")
@@ -441,8 +441,8 @@ def _split_drug_ids_aligned(raw, n: int) -> list[str | None]:
     """Split a comma-separated therapy_drugbank_id/therapy_chembl_id
     value into exactly n position-aligned slots, matching
     therapy_name's own drug count (see resolve_civic_drug_row — name is
-    the one field with no leading/trailing comma artifacts, confirmed
-    empirically, so it's the reliable source of the true slot count).
+    the one field with no leading/trailing comma artifacts, so it's the
+    reliable source of the true slot count).
 
     Previously this filtered out empty segments (`if x.strip()`), which
     silently destroyed position alignment whenever a non-last drug in a
@@ -456,9 +456,9 @@ def _split_drug_ids_aligned(raw, n: int) -> list[str | None]:
     now kept positionally (as "", already falsy to resolve_civic_drug's
     `if chembl_id:` checks) and the list is only trimmed/padded against
     n — trimming specifically discards the trailing-comma artifacts that
-    DO exist in this field (confirmed empirically: 177/217 rows have a
-    trailing comma in therapy_drugbank_id/therapy_chembl_id respectively,
-    none in therapy_name) without re-introducing the same misalignment
+    DO exist in this field (177/217 rows have a trailing comma in
+    therapy_drugbank_id/therapy_chembl_id respectively, none in
+    therapy_name) without re-introducing the same misalignment
     for a genuine leading/internal empty slot.
     """
     if pd.isna(raw):

@@ -40,11 +40,9 @@ def build_ego_network(G: nx.DiGraph, center_id: str, hops: int = 1) -> nx.DiGrap
     """Breadth-first expansion from center_id, following edges in EITHER
     direction at each hop (successors AND predecessors), not just
     successors. This schema's edges are semantically mostly undirected even
-    though G itself is a DiGraph (see the spec's directionality section and
-    this pipeline's own from/to work) — a successors-only walk would
-    silently drop any node only reachable via an edge stored pointing the
-    other way, which for a hub node like an evidence item is most of its
-    neighbors."""
+    though G itself is a DiGraph — a successors-only walk would silently
+    drop any node only reachable via an edge stored pointing the other way,
+    which for a hub node like an evidence item is most of its neighbors."""
     visited = {center_id}
     frontier = {center_id}
     for _ in range(hops):

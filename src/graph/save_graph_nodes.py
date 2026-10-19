@@ -13,10 +13,10 @@ Two node types are genuinely new to OptimusKG::
       established: variant_clinvar_id, variant_clinvar_ids, dbSNP rsid
       crosswalk). The fourth track, evidence_referenced, is every ClinVar
       variant any CIViC evidence item references (built by
-      civic_clinvar_gap_analysis.py section 5). That is,a referenced variant
-      still gets a node even where it doesn't carry a pathogenic/oncogenic/
-      Tier I-III classification (e.g. Benign, or unclassified), because
-      it's referenced by a CIViC evidence item.
+      civic_clinvar_gap_analysis.py section 5) — it gets a node even
+      without a pathogenic/oncogenic/Tier I-III classification (e.g.
+      Benign, or unclassified), since it's referenced by a CIViC
+      evidence item.
 
       Also carries civic_clinvar_gap_analysis.py's actual gap verdict,
       which that script computes but (until now) never wrote anywhere past
@@ -218,10 +218,9 @@ clinvar_summary = clinvar_summary.sort_values("_grch38_first").drop_duplicates(
 )
 clinvar_summary = clinvar_summary.drop(columns=["_grch38_first"])
 
-# One-to-many, not one-to-one (see civic_clinvar_gap_analysis.py's
-# identical fix for why) (Some rsIDs map to more than
-# one VariationID; dict(zip(...)) would silently keep only one, dropping a
-# real match rather than just picking arbitrarily).
+# One-to-many, not one-to-one — some rsIDs map to more than one
+# VariationID; dict(zip(...)) would silently keep only one, dropping a
+# real match (see civic_clinvar_gap_analysis.py's identical fix).
 rsid_to_variationids = (
     clinvar_summary.loc[clinvar_summary["RS# (dbSNP)"] != "-1"]
     .groupby("RS# (dbSNP)")["VariationID"]

@@ -13,8 +13,8 @@ structural gap, 6 ClinVar variant gap.
 
 src/analysis/exploratory/graph_ego_figures.py is an earlier, superseded
 approach to building these same 5 figures directly via matplotlib/
-networkx rather than through the Streamlit app — kept for reference, not
-part of the current figure-building path. Its FIG1_HIT_EVI/FIG1_MISS_EVI/
+networkx rather than through the Streamlit app, not part of the current
+figure-building path. Its FIG1_HIT_EVI/FIG1_MISS_EVI/
 FIG2_EVI/FIG3_EVI/FIG5_EVI constants predate this script's
 PINNED_EVI_IDS mechanism below.
 
@@ -341,9 +341,9 @@ report["fig3"] = {
 # Figure 4: EVI with >=2 resolved drugs where a direct native
 # SYNERGISTIC_INTERACTION edge exists between two of them. Despite the
 # name, this relation is sourced entirely from DrugBank's drug-drug
-# INTERACTION data (checked directly: 0/157,329 descriptions carry
-# positive-synergy language; all are pharmacokinetic/toxicity cautions) —
-# so this is a safety flag, not a validation that a combination works.
+# INTERACTION data (0/157,329 descriptions carry positive-synergy
+# language; all are pharmacokinetic/toxicity cautions) — so this is a
+# safety flag, not a validation that a combination works.
 # Split by the EVI's own therapy_interaction_type: COMBINATION (drugs
 # actually co-administered — flags a real interaction risk within CIViC's
 # own combination claim) vs. SUBSTITUTES (interchangeable alternatives — a
@@ -415,8 +415,8 @@ report["fig4_substitutes"] = {
 # structurally connected but never reviewed by CIViC. Reformulated to
 # surface ALL such diseases per gene (previously just the first match) —
 # CIViC-aligned genes turn out to have hundreds of these on average
-# (verified directly against the graph: median 610, max 1866 across the
-# 337 CIViC-aligned genes), far too many to show at once, so the top
+# (median 610, max 1866 across the 337 CIViC-aligned genes), far too
+# many to show at once, so the top
 # FIG5_TOP_DISEASES are selected to prefer diverse examples: a greedy
 # pick that skips a candidate disease if it shares a DIS-DIS/PARENT
 # "family" with one already picked — the same connected hierarchy
@@ -424,19 +424,19 @@ report["fig4_substitutes"] = {
 # diseases that are merely siblings under a common ancestor (e.g. two
 # subtypes of the same broader syndrome) are excluded from co-occurring
 # too, not just direct ancestor/descendant pairs. This is deliberately
-# stricter than just excluding direct ancestor/descendant pairs: checked
-# directly against 5 real examples, the stricter version sometimes yields
-# well under 10 truly-diverse diseases (as few as 2 for one gene whose
-# candidates cluster into one or two large hereditary-syndrome families)
+# stricter than just excluding direct ancestor/descendant pairs: the
+# stricter version sometimes yields well under 10 truly-diverse diseases
+# (as few as 2 for one gene whose candidates cluster into one or two
+# large hereditary-syndrome families)
 # — the fallback below still pads out to FIG5_TOP_DISEASES with
 # (possibly related) leftovers in that case, since showing fewer than 10
 # is worse than showing 10 with a few related ones mixed in.
 # This is the one search that's also committed, unmodified, in
 # graph_ego_figures.py's build_figure4_gene_disease_gap() (which picks a
-# single hardcoded example for the paper's static figure, under that
-# script's own, unrenumbered FIG4 naming) — not updated here, since this
-# reformulation is specifically for find_figure_candidates.py's own
-# candidate listing and the Streamlit browser, not the paper figure itself.
+# single hardcoded example, under that script's own, unrenumbered FIG4
+# naming) — not updated here, since this reformulation is specifically
+# for find_figure_candidates.py's own candidate listing and the
+# Streamlit browser.
 # ---------------------------------------------------------------------------
 
 FIG5_TOP_DISEASES = 10
@@ -550,9 +550,7 @@ report["fig5"] = {
 # which is global (true if ANY evidence item references the variant,
 # regardless of type) and would under-count real gaps — e.g. a variant
 # with a PREDICTIVE evidence item but no PREDISPOSING one is still a
-# genuine predisposing gap. This mismatch is exactly why this search is
-# being run standalone before deciding whether/how to add the
-# type-matched flags onto the VAR node itself in save_graph_nodes.py.
+# genuine predisposing gap.
 #
 # review_status_clinvar (the plain ClinVar ReviewStatus column, meant to
 # mirror civic_clinvar_gap_analysis.py's high-confidence stratification

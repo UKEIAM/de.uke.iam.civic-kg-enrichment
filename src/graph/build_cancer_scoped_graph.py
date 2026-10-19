@@ -250,8 +250,7 @@ G = nx.DiGraph()
 # iteration order find_figure_candidates.py's evi_nodes dict inherits (dict
 # order = insertion order), which otherwise varies run-to-run with Python's
 # randomized string-hash seed and silently reshuffles which EVIs land in
-# each figure's saved top-N — confirmed by rerunning the pipeline twice with
-# zero other changes and getting two different top-15 lists per figure.
+# each figure's saved top-N.
 for n in sorted(cancer_gdd_ids | all_evi_ids):
     G.add_node(n, **gdd_evi_node_attrs[n])
 

@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-Overall statistics of the cancer-scoped graph for the paper's Results section:
-basic graph counts, entity-resolution coverage, variant-resolution coverage
-(reported separately from entity resolution — see section 4b), ClinVar
+Overall statistics of the cancer-scoped graph: basic graph counts,
+entity-resolution coverage, variant-resolution coverage (reported
+separately from entity resolution — see section 4b), ClinVar
 gap-detection coverage, origin=civic-only edge counts, catalog/variant
 curation coverage, disease-hierarchy richness, and the hit/miss rates behind
 Figures 1, 2, and 5.
 
 Figures 1/2/5 here are NOT the same computation as find_figure_candidates.py:
 that script picks good individual examples across ALL evidence types (for
-Figs 2/5) and doesn't track a "neither" bucket (for Fig 1). This script restates
-all three PREDICTIVE-only, scoped exactly as the paper's results text needs.
+Figs 2/5) and doesn't track a "neither" bucket (for Fig 1). This script
+restates all three PREDICTIVE-only.
 
 ClinVar gap-detection coverage (section 5) is restricted to the ~53k variants
 in the original CIViC-aligned-gene tracks (predisposing/oncogenic/
 clinical_impact). The broader ~74.6k-variant cancer_scoped_plp_hiconf
-population build_cancer_scoped_variants.py adds on top was explicitly ruled
-out of scope for gap detection in an earlier conversation; those variants have
-is_gap_candidate=None (never evaluated) and are reported as a separate
-"not_evaluated" count, never folded into covered or gap.
+population build_cancer_scoped_variants.py adds on top is explicitly out
+of scope for gap detection; those variants have is_gap_candidate=None
+(never evaluated) and are reported as a separate "not_evaluated" count,
+never folded into covered or gap.
 
 Inputs:
     - data/graphs/cancer_scoped_graph_*.pkl (from build_cancer_scoped_graph.py)

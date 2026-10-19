@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Builds the direct "hub" edges connecting Gene/Disease/Drug/Variant to Evidence item, plus
-Variant-Gene and Variant-Disease. All six are Direct edges per the spec
-(as opposed to Phase 3's Projected edges, built via one shared
-derive_projected_edges-style function on top of these).
+Variant-Gene and Variant-Disease. All six are Direct edges (as opposed to
+Projected edges, built via one shared derive_projected_edges-style
+function on top of these).
 
 Five of the six are mechanical explodes of list columns
 (save_graph_nodes.py) already computed:
@@ -11,8 +11,8 @@ Five of the six are mechanical explodes of list columns
       drug_node_ids.
     - DISEASE-EVIDENCE: Evidence item's disease_node_id is already scalar.
     - VARIANT-EVIDENCE: explode Evidence item's variant_node_ids (itself
-      already filtered in Phase 1 to VariationIDs that resolved to a real
-      Variant node).
+      already filtered to VariationIDs that resolved to a real Variant
+      node).
     - VARIANT-DISEASE: two independent origins, merged where they agree —
       clinvar_phenotype (Variant's resolved_phenotype_disease_ids, the
       MONDO crosswalk from clinvar_optimuskg_disease_alignment.py) and
@@ -24,8 +24,8 @@ VARIANT-GENE: Variant nodes only carry ClinVar's own gene_id_entrez, not an Opti
 Reuses the same Entrez -> OptimusKG crosswalk civic_optimuskg_alignment.py's gene
 resolution already established (hgnc_hub and direct_ensembl tiers).
 
-Section 5 is a cross-consistency validation the spec calls out directly:
-for every VARIANT-EVIDENCE edge, confirm the variant's VARIANT-GENE
+Section 5 is a cross-consistency validation: for every VARIANT-EVIDENCE
+edge, confirm the variant's VARIANT-GENE
 target(s) overlap that same evidence item's own GENE-EVIDENCE target(s). A
 mismatch doesn't necessarily mean a bug (ClinVar and CIViC can legitimately
 attribute a variant to different genes at a locus, or the variant may not
@@ -220,8 +220,7 @@ print("[hub] wrote VARIANT-GENE edge table")
 # %%
 # ---------------------------------------------------------------------------
 # 3. VARIANT-EVIDENCE: explode Evidence item's variant_node_ids (already
-#    filtered in Phase 1 to VariationIDs that resolved to a real Variant
-#    node).
+#    filtered to VariationIDs that resolved to a real Variant node).
 # ---------------------------------------------------------------------------
 
 variant_evidence_edges = build_list_hub_edges(

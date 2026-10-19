@@ -131,8 +131,8 @@ print(
 )
 
 # dbSNP rsID -> ClinVar VariationID(s), bare-number keyed. One-to-many, not
-# one-to-one: 222,427 rsIDs (8.4% of all rsIDs with a VariationID, checked
-# directly) genuinely correspond to more than one distinct ClinVar record
+# one-to-one: 222,427 rsIDs (8.4% of all rsIDs with a VariationID)
+# genuinely correspond to more than one distinct ClinVar record
 # (different submitters/interpretations of the same variant, multi-allelic
 # sites, …). Building this as a plain dict(zip(...)) would silently keep
 # only whichever VariationID happened to appear last for a colliding rsID
@@ -394,7 +394,7 @@ print(
 #    Same structure as section 2, different classification column and CIViC
 #    evidence type. IMPORTANT: unlike germline ClinicalSignificance, real
 #    (non-"-") Oncogenicity classifications are globally sparse (~3,800 rows
-#    across all of ClinVar) — but empirically confirmed to concentrate almost
+#    across all of ClinVar) — but concentrate almost
 #    entirely (~78%, 2,981 variants) on genes already aligned with CIViC, a
 #    selection effect: the genes CIViC curators prioritize are the same genes
 #    clinical labs prioritize for oncogenicity submission. This makes the

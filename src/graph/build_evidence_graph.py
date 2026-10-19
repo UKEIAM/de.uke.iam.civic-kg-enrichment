@@ -13,7 +13,7 @@ types, not OptimusKG's other native node types (Biological process,
 Phenotype, Anatomy, Molecular function, Cellular component, Pathway,
 Exposure) or its other native edges (GEN-GEN, DRG-PHE, DIS-DIS, etc.).
 
-Cross-consistency validations (spec's "Further considerations"):
+Cross-consistency validations:
     1. VARIANT-EVIDENCE vs VARIANT-GENE/GENE-EVIDENCE:
        already run once in save_graph_edges_hub.py; re-run here for one complete
        report in a single place.
@@ -78,13 +78,11 @@ EDGE_TYPES = [
 # 3-letter node / 3-letter-dash-3-letter edge convention. Direction
 # (from-first) matches each table's own already-established from/
 # to columns, which for gene_drug ("DRG-GEN") and drug_disease
-# ("DRG-DIS") already matches OptimusKG's native storage direction (Phase 4
-# deliberately chose those directions for that reason). The one exception:
-# gene_disease becomes "GEN-DIS" (gene-first, matching its actual
-# from=gene column), not OptimusKG's native "DIS-GEN" (disease-first) —
-# Phase 3 built that table gene-first to match the spec doc's prose
-# ordering, and relabeling it "DIS-GEN" without also flipping its columns
-# would make the label lie about what from/to actually mean.
+# ("DRG-DIS") already matches OptimusKG's native storage direction. The
+# one exception: gene_disease becomes "GEN-DIS" (gene-first, matching its
+# actual from=gene column), not OptimusKG's native "DIS-GEN"
+# (disease-first) — relabeling it "DIS-GEN" without also flipping its
+# columns would make the label lie about what from/to actually mean.
 NODE_TYPE_LABELS = {
     "gene": "GEN",
     "disease": "DIS",

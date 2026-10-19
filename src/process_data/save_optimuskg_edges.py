@@ -10,27 +10,22 @@ full rerun of this pipeline's edge-extraction stage. The optimuskg library
 itself doesn't expose edge access, so the pickle (networkx MultiDiGraph)
 is the only way to get at any of these.
 
-Per-edge-type notes (carried over from the scripts this replaces):
+Per-edge-type notes:
     - DRUG-DRUG: both endpoints are DRG nodes — matched structurally (by
       node label), not by an edge "label" attribute. Edge attrs vary by
       relation (SYNERGISTIC_INTERACTION carries interaction_description,
       PARENT doesn't).
-    - DISEASE-GENE: edge label "DIS-GEN". Confirmed (Phase 0 check, see
-      civic_optimuskg_alignment.py-era conversation) to carry a single
-      generic relation, ASSOCIATED_WITH, across all 9.7M edges — safe to
-      treat as one flat set of pairs.
+    - DISEASE-GENE: edge label "DIS-GEN". Carries a single generic
+      relation, ASSOCIATED_WITH, across all 9.7M edges — safe to treat as
+      one flat set of pairs.
     - GENE-DRUG: edge label "DRG-GEN" (or "GEN-DRG", both accepted) — a
       drug's molecular mechanism of action.
-    - DRUG-DISEASE: edge label "DRG-DIS". Confirmed to carry three
-      distinct, semantically opposed relations — INDICATION/
-      CONTRAINDICATION/OFF_LABEL_USE — unlike DIS-GEN's single generic
-      ASSOCIATED_WITH, which is exactly why DRUG-DISEASE needs the
-      namespaced treatment rather than GENE-DISEASE's merged
-      origin/evidence_items shape (see save_graph_edges_namespaced.py).
-
-Loading the pickle is the expensive part (~6.8GB, ~2 min to unpickle) —
-worth running this once and reading the parquet outputs afterward rather
-than re-loading the graph for every edge-type question.
+    - DRUG-DISEASE: edge label "DRG-DIS". Carries three distinct,
+      semantically opposed relations — INDICATION/CONTRAINDICATION/
+      OFF_LABEL_USE — unlike DIS-GEN's single generic ASSOCIATED_WITH,
+      which is why DRUG-DISEASE needs the namespaced treatment rather than
+      GENE-DISEASE's merged origin/evidence_items shape (see
+      save_graph_edges_namespaced.py).
 """
 
 import os
@@ -59,8 +54,7 @@ print(f"[setup] {len(drg_ids)} drug (DRG) nodes")
 # DRUG-DRUG is matched structurally (both endpoints in drg_ids) and is
 # independent of the other three, which are matched by edge label — an
 # edge can't land in more than one bucket, but each check is kept
-# independent (not one big elif) to mirror exactly what the four separate
-# scripts each did on their own full scan.
+# independent (not one big elif).
 drug_drug_rows = []
 disease_gene_rows = []
 gene_drug_rows = []

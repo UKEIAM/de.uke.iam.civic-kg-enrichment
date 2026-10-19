@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared visual encoding and rendering helpers for this project's graph
 figure scripts — graph_ego_networks.py's generic picker, graph_ego_figures.py's
-4 EVI-centered paper figures, and graph_community_figures.py's community
+4 EVI-centered figures, and graph_community_figures.py's community
 examples all color/label nodes by node_type the same way and share the
 same tooltip/legend/export machinery, kept here once so they can't drift
 out of sync with each other. Panel-layout logic that's genuinely specific
@@ -275,9 +275,9 @@ def legend_html(
 
 def title_bar_html(title: str) -> str:
     """A single title bar, injected once into the page — pyvis Network's
-    own heading=... parameter renders its default template's <h1> TWICE (a
-    template quirk, not anything about the title text itself), so callers
-    build the title here instead and never pass heading= to Network()."""
+    own heading=... parameter renders its default template's <h1> TWICE, so
+    callers build the title here instead and never pass heading= to
+    Network()."""
     return (
         '<div style="text-align:center;padding:14px 10px 2px;'
         'font:600 20px -apple-system,sans-serif;">'

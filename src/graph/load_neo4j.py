@@ -87,9 +87,8 @@ MERGED_RECORD_LIST_EDGE_TYPES = {
 SHARED_NAMESPACED_EDGE_TYPES = {"DRG-GEN", "DRG-DIS"}
 
 # Native pass-through types: OptimusKG's own relation value IS the type,
-# one relationship per edge, no CIViC overlay to split out. ANA-GEN was
-# missing from the spec's own table (an oversight caught here, not in
-# review) — the expanded graph carries 86,141 of them, so omitting it would
+# one relationship per edge, no CIViC overlay to split out. ANA-GEN
+# carries 86,141 edges in the expanded graph — omitting it here would
 # crash on the first one.
 NATIVE_PASSTHROUGH_EDGE_TYPES = {
     "GEN-GEN",
@@ -145,7 +144,7 @@ def flatten_properties(attrs: dict, exclude: set) -> dict:
 
 
 def edge_to_relationships(edge_type: str, attrs: dict) -> list[tuple[str, dict]]:
-    """The single place the spec's Direct/Merged/Shared/native-pass-through
+    """The single place the Direct/Merged/Shared/native-pass-through
     typing rules live. Returns a list of (relationship_type, properties)
     pairs — usually one, sometimes several for a Merged edge whose origin/
     evidence_items list has more than one entry, occasionally zero (a

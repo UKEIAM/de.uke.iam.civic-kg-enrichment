@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-EXPLORATORY / SUPERSEDED: the paper's published figures were ultimately
-picked and exported from src/app/candidate_browser.py (Streamlit), not
-from this script. Kept for reference only.
+EXPLORATORY / SUPERSEDED: the published figures were ultimately picked
+and exported from src/app/candidate_browser.py (Streamlit), not from
+this script.
 
 5 purpose-built figures:
 1. mechanism of action (hit/miss pair)
@@ -109,9 +109,9 @@ def has_relation_at_hop(
     out a node it already knows about (Figure 4 excludes the EVI's own
     disease, so the search finds a genuinely different one).
 
-    Returns the (mid, target) pair found, or None — unlike the boolean the
-    figures spec's own pseudocode returns, the figures below need to know
-    *which* mid/target nodes satisfied the check to actually draw them."""
+    Returns the (mid, target) pair found, or None, not just a boolean —
+    the figures below need to know *which* mid/target nodes satisfied the
+    check to actually draw them."""
     for mid in list(G.successors(center_id)) + list(G.predecessors(center_id)):
         if G.nodes[mid].get("node_type") != mid_type:
             continue
@@ -351,9 +351,8 @@ for u, v, d in CSG.edges(data=True):
     elif et == "DRG-PHE":
         drg_phe_by_drug.setdefault(u, []).append((v, d.get("relation")))
     elif et == "DIS-DIS" and d.get("relation") == "PARENT":
-        # from = parent, to = child — confirmed against the raw nodes'
-        # own children/parents attrs (see the plan's verification table),
-        # NOT the reverse "child is_a parent" reading MONDO's own RDF uses.
+        # from = parent, to = child — NOT the reverse "child is_a parent"
+        # reading MONDO's own RDF uses.
         dis_parent_of.setdefault(v, []).append(u)
     elif et == "GEN-DIS":
         gen_dis_origin.setdefault(u, []).append((v, d.get("origin")))
@@ -389,9 +388,8 @@ def build_figure1_moa() -> None:
 
     # gene_node_ids/drug_node_ids are lists (an EVI can resolve to more than
     # one of either) — search every (gene, drug) combination rather than
-    # assuming index 0 is "the" pair; that assumption is what silently
-    # picked the wrong drug the first time this ran (CIVICEVI_1598's first
-    # listed drug wasn't vemurafenib).
+    # assuming index 0 is "the" pair (CIVICEVI_1598's first listed drug
+    # isn't vemurafenib).
     hit_attrs = CSG.nodes[FIG1_HIT_EVI]
     hit_pair = None
     for hit_gene in (g for g in hit_attrs["gene_node_ids"] if g):
@@ -529,9 +527,8 @@ def build_figure1_moa() -> None:
 # %%
 # ---------------------------------------------------------------------------
 # Figure 2: drug safety/usage context (DRG-PHE, CONTRAINDICATION).
-# ADVERSE_DRUG_REACTION doesn't exist in native DRG-PHE data at all — see
-# the plan's verification table; CONTRAINDICATION is the real, populated
-# relation used here instead.
+# ADVERSE_DRUG_REACTION doesn't exist in native DRG-PHE data at all;
+# CONTRAINDICATION is the real, populated relation used here instead.
 # ---------------------------------------------------------------------------
 
 FIG2_EVI = "CIVICEVI_1395"  # gefitinib, 2 contraindicated phenotypes
@@ -768,9 +765,9 @@ def build_figure4_gene_disease_gap() -> None:
 # Figure 5: drug-drug interaction safety flag (DRG-DRG,
 # SYNERGISTIC_INTERACTION). Despite its name, this native relation is
 # sourced entirely from DrugBank's drug-drug INTERACTION data, not a
-# documented therapeutic-synergy claim — checked directly: 0 of 157,329
-# descriptions carry positive/beneficial-synergy language, and every one
-# is a pharmacokinetic/toxicity caution ("risk of adverse effects can be
+# documented therapeutic-synergy claim — 0 of 157,329 descriptions carry
+# positive/beneficial-synergy language, and every one is a
+# pharmacokinetic/toxicity caution ("risk of adverse effects can be
 # increased," "serum concentration/metabolism altered," etc.). So this
 # figure isn't validating that a CIViC-cited combination is effective —
 # it's flagging that OptimusKG's independent pharmacology data documents a
